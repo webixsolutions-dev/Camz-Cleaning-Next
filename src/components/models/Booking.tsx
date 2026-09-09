@@ -778,7 +778,7 @@ const BookingModal = ({
     }
   }, [isOpen]);
 
-  const getCurrentLocation = () => {
+  const getCurrentLocation = async () => {
     if (!window.isSecureContext) {
       showLocationError(
         "Current location requires HTTPS. Open the live HTTPS website or type the address manually.",
@@ -791,6 +791,25 @@ const BookingModal = ({
         "This browser does not support current location. Please type the address manually.",
       );
       return;
+    }
+
+    if ("permissions" in navigator) {
+      try {
+        const permission = await navigator.permissions.query({
+          name: "geolocation",
+        });
+
+        if (permission.state === "denied") {
+          showLocationError(
+            "Location access is blocked. Click the lock icon beside the browser address, open Site settings, set Location to Allow, then reload this page.",
+          );
+          return;
+        }
+      } catch (error) {
+        // Some browsers do not expose geolocation through Permissions API.
+        // Calling getCurrentPosition below will still show their native prompt.
+        console.debug("Geolocation permission state is unavailable:", error);
+      }
     }
 
     setLoadingLocation(true);
@@ -831,14 +850,19 @@ const BookingModal = ({
       (error) => {
         console.warn("Geolocation error:", error.message);
         setLoadingLocation(false);
+        const blockedByPolicy = /permissions policy|disabled in this document/i.test(
+          error.message,
+        );
         const messages: Record<number, string> = {
           1: "Location permission was denied. Allow location access in your browser or type the address manually.",
           2: "Your location is currently unavailable. Please try again or type the address manually.",
           3: "Location detection timed out. Please try again or type the address manually.",
         };
         showLocationError(
-          messages[error.code] ||
-            "We could not read your location. Please type the address manually.",
+          blockedByPolicy
+            ? "Location is disabled by this page's Permissions Policy. Open the booking page directly in a browser tab and allow geolocation=(self) in the website/server configuration."
+            : messages[error.code] ||
+                "We could not read your location. Please type the address manually.",
         );
       },
       {
@@ -1365,7 +1389,7 @@ const BookingModal = ({
 
                       <button
                         type="button"
-                        onClick={getCurrentLocation}
+                        onClick={() => void getCurrentLocation()}
                         disabled={loadingLocation || isValidatingAddress}
                         className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >

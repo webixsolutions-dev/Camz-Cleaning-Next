@@ -14,7 +14,7 @@ const csp = [
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
-  ...(isProduction ? ["upgrade-insecure-requests"] : []), // 🔥 FIX 1: Ab yeh sirf Production (live) mein chalega, local dev ko tang nahi karega!
+  ...(isProduction ? ["upgrade-insecure-requests"] : []),
 ].join("; ");
 
 const securityHeaders = [
@@ -22,20 +22,30 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+  {
+    key: "Permissions-Policy",
+    value:
+      "camera=(), microphone=(), geolocation=(self), payment=(), usb=()",
+  },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   { key: "Cross-Origin-Resource-Policy", value: "same-site" },
   ...(isProduction
-    ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }]
+    ? [
+        {
+          key: "Strict-Transport-Security",
+          value: "max-age=63072000; includeSubDomains; preload",
+        },
+      ]
     : []),
 ];
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ['127.0.0.1', 'localhost'], // 🔥 FIX 2: Next.js ab 127.0.0.1 ko block nahi karega!
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   trailingSlash: true,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
   compress: true,
+
   async headers() {
     return [
       {
@@ -44,6 +54,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+
   images: {
     remotePatterns: [
       {
