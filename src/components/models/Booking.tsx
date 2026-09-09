@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -25,17 +26,240 @@ import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  isSupportedAddress,
-  isSupportedCoordinates,
-  SERVICE_AREA_LABEL,
-  validateAddressWithAPI, // <-- Naya import yahan add hua
-} from "@/lib/serviceArea";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const CALGARY_TIME_ZONE = "America/Edmonton";
+
+const SERVICE_AREAS = [
+  "Calgary",
+  "Airdrie",
+  "Cochrane",
+  "Chestermere",
+] as const;
+
+type ServiceArea = (typeof SERVICE_AREAS)[number];
+
+const SERVICE_AREA_LABEL = "Calgary, Airdrie, Cochrane and Chestermere";
+const CANADIAN_POSTAL_CODE_PATTERN =
+  /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ][ -]?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i;
+
+const SERVICE_AREA_POSTAL_PREFIXES: Record<ServiceArea, RegExp> = {
+  Calgary: /^(T1Y|T2[A-Z]|T3[A-Z])$/,
+  Airdrie: /^T4[AB]$/,
+  Cochrane: /^T4C$/,
+  Chestermere: /^T1X$/,
+};
+
+type NominatimAddress = {
+  house_number?: string;
+  road?: string;
+  pedestrian?: string;
+  neighbourhood?: string;
+  suburb?: string;
+  city?: string;
+  town?: string;
+  village?: string;
+  municipality?: string;
+  county?: string;
+  state?: string;
+  "ISO3166-2-lvl4"?: string;
+  postcode?: string;
+  country?: string;
+  country_code?: string;
+};
+
+type NominatimResult = {
+  lat?: string;
+  lon?: string;
+  display_name?: string;
+  addresstype?: string;
+  type?: string;
+  address?: NominatimAddress;
+};
+
+type AddressValidationResult = {
+  valid: boolean;
+  message: string;
+  formattedAddress?: string;
+  coordinates?: { lat: number; lng: number };
+  serviceArea?: ServiceArea;
+  postalCode?: string;
+};
+
+const normalizeText = (value = "") =>
+  value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+
+const normalizePostalCode = (value = "") => {
+  const compact = value.replace(/\s|-/g, "").toUpperCase();
+  return compact.length === 6
+    ? `${compact.slice(0, 3)} ${compact.slice(3)}`
+    : value.trim().toUpperCase();
+};
+
+const getAreaFromText = (value = ""): ServiceArea | null => {
+  const normalized = normalizeText(value);
+  return (
+    SERVICE_AREAS.find((area) =>
+      normalized.includes(normalizeText(area)),
+    ) ?? null
+  );
+};
+
+const getAreaFromPostalCode = (postcode = ""): ServiceArea | null => {
+  const compact = postcode.replace(/\s|-/g, "").toUpperCase();
+  if (!CANADIAN_POSTAL_CODE_PATTERN.test(compact)) return null;
+
+  const prefix = compact.slice(0, 3);
+  return (
+    SERVICE_AREAS.find((area) =>
+      SERVICE_AREA_POSTAL_PREFIXES[area].test(prefix),
+    ) ?? null
+  );
+};
+
+const validateNominatimResult = (
+  result: NominatimResult,
+): AddressValidationResult => {
+  const address = result.address ?? {};
+  const countryCode = (address.country_code ?? "").toLowerCase();
+  const provinceCode = (address["ISO3166-2-lvl4"] ?? "").toUpperCase();
+  const province = normalizeText(address.state);
+
+  if (
+    countryCode !== "ca" ||
+    (provinceCode !== "CA-AB" && province !== "alberta")
+  ) {
+    return {
+      valid: false,
+      message: "Please enter an address in Alberta, Canada.",
+    };
+  }
+
+  const localityText = [
+    address.city,
+    address.town,
+    address.village,
+    address.municipality,
+    address.county,
+    address.suburb,
+    result.display_name,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const localityArea = getAreaFromText(localityText);
+  const postalCode = normalizePostalCode(address.postcode);
+  const postalArea = getAreaFromPostalCode(postalCode);
+
+  if (!localityArea && !postalArea) {
+    return {
+      valid: false,
+      message: `This address is outside our service area: ${SERVICE_AREA_LABEL}.`,
+    };
+  }
+
+  if (localityArea && postalArea && localityArea !== postalArea) {
+    return {
+      valid: false,
+      message: "The city and postal code do not match. Please check the address.",
+    };
+  }
+
+  const hasStreet = Boolean(
+    address.road || address.pedestrian || address.house_number,
+  );
+  if (!hasStreet) {
+    return {
+      valid: false,
+      message: "Please enter a complete street address, not only a city name.",
+    };
+  }
+
+  const lat = Number(result.lat);
+  const lng = Number(result.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return {
+      valid: false,
+      message: "We could not determine the address coordinates.",
+    };
+  }
+
+  const serviceArea = localityArea ?? postalArea!;
+  return {
+    valid: true,
+    message: `Great! This address is inside our ${serviceArea} service area.`,
+    formattedAddress: result.display_name?.trim(),
+    coordinates: { lat, lng },
+    serviceArea,
+    postalCode: postalCode || undefined,
+  };
+};
+
+const searchServiceAddress = async (
+  query: string,
+): Promise<AddressValidationResult> => {
+  const cleanQuery = query.trim();
+  if (cleanQuery.length < 6) {
+    return {
+      valid: false,
+      message: "Please enter your complete service address.",
+    };
+  }
+
+  const params = new URLSearchParams({
+    type: "search",
+    q: /canada/i.test(cleanQuery)
+      ? cleanQuery
+      : `${cleanQuery}, Alberta, Canada`,
+  });
+
+  const response = await fetch(`/api/geocode?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error("Address lookup is temporarily unavailable.");
+  }
+
+  const results = (await response.json()) as NominatimResult[];
+  for (const result of results) {
+    const validation = validateNominatimResult(result);
+    if (validation.valid) return validation;
+  }
+
+  return {
+    valid: false,
+    message:
+      results.length === 0
+        ? "We could not find this address. Include the street number, street name, city and postal code."
+        : `This address is not inside ${SERVICE_AREA_LABEL}.`,
+  };
+};
+
+const reverseGeocodeServiceAddress = async (
+  lat: number,
+  lng: number,
+): Promise<AddressValidationResult> => {
+  const params = new URLSearchParams({
+    type: "reverse",
+    lat: String(lat),
+    lng: String(lng),
+  });
+
+  const response = await fetch(`/api/geocode?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error("Location lookup is temporarily unavailable.");
+  }
+
+  return validateNominatimResult(
+    (await response.json()) as NominatimResult,
+  );
+};
 
 // --- Types ---
 interface Service {
@@ -106,10 +330,16 @@ const BookingModal = ({
   const [date, setDate] = useState<Dayjs | null>(null);
   const [time, setTime] = useState<Dayjs | null>(null);
   const [location, setLocation] = useState("");
-  
-  // Nayi states yahan hain
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [isValidatingAddress, setIsValidatingAddress] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<
+    "idle" | "valid" | "error"
+  >("idle");
+  const [locationMessage, setLocationMessage] = useState("");
+  const [validatedLocation, setValidatedLocation] = useState("");
+  const [validatedServiceArea, setValidatedServiceArea] =
+    useState<ServiceArea | null>(null);
+  const [validatedPostalCode, setValidatedPostalCode] = useState("");
   
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
@@ -131,7 +361,64 @@ const BookingModal = ({
     return !!selected && selected.isAfter(getCalgaryNow().add(15, "minute"));
   };
 
-  // Naya async nextStep function
+  const applyValidLocation = (result: AddressValidationResult) => {
+    const formattedAddress = result.formattedAddress?.trim() || location.trim();
+    setLocation(formattedAddress);
+    setCoordinates(result.coordinates ?? null);
+    setValidatedLocation(formattedAddress);
+    setValidatedServiceArea(result.serviceArea ?? null);
+    setValidatedPostalCode(result.postalCode ?? "");
+    setLocationStatus("valid");
+    setLocationMessage(result.message);
+    setSubmitError(null);
+  };
+
+  const showLocationError = (message: string) => {
+    setCoordinates(null);
+    setValidatedLocation("");
+    setValidatedServiceArea(null);
+    setValidatedPostalCode("");
+    setLocationStatus("error");
+    setLocationMessage(message);
+  };
+
+  const validateEnteredLocation = async () => {
+    const cleanLocation = location.trim();
+
+    if (
+      locationStatus === "valid" &&
+      validatedLocation === cleanLocation &&
+      coordinates
+    ) {
+      return true;
+    }
+
+    setIsValidatingAddress(true);
+    setLocationStatus("idle");
+    setLocationMessage("");
+
+    try {
+      const result = await searchServiceAddress(cleanLocation);
+      if (!result.valid) {
+        showLocationError(result.message);
+        return false;
+      }
+
+      applyValidLocation(result);
+      return true;
+    } catch (error) {
+      console.error("Address validation failed:", error);
+      showLocationError(
+        error instanceof Error
+          ? error.message
+          : "We could not verify this address. Please try again.",
+      );
+      return false;
+    } finally {
+      setIsValidatingAddress(false);
+    }
+  };
+
   const nextStep = async () => {
     if (step === 1 && isGuest) {
       if (guestName.trim().length < 2) {
@@ -161,21 +448,14 @@ const BookingModal = ({
         alert("Please choose a future date and time.");
         return;
       }
-      
-      // --> API Address Validation <--
-      setIsValidatingAddress(true);
-      const isRealAddress = await validateAddressWithAPI(location);
-      setIsValidatingAddress(false);
-
-      if (!isRealAddress) {
-        alert(`Please enter a valid actual address within ${SERVICE_AREA_LABEL}.`);
+      const isAddressValid = await validateEnteredLocation();
+      if (!isAddressValid) {
         return;
       }
     }
     setStep((prev) => Math.min(prev + 1, totalSteps));
   };
 
-  // Updated isStepValid
   const isStepValid = () => {
     if (step === 1 && isGuest) {
       const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail);
@@ -190,7 +470,7 @@ const BookingModal = ({
         !!date &&
         !!time &&
         isValidSchedule() &&
-        location.trim().length > 5 // Sirf string length check karega, API Next button par call hogi
+        location.trim().length > 5
       );
     }
     return true;
@@ -198,7 +478,6 @@ const BookingModal = ({
 
   const prevStep = () => setStep((prev) => Math.max(prev - 1, 1));
 
-  // Updated handleConfirm
   const handleConfirm = async () => {
     if (!isGuest && !user) {
       setSubmitError("Please log in to book a service");
@@ -217,13 +496,9 @@ const BookingModal = ({
       return;
     }
 
-    // --> API Check on Final Submit <--
-    setIsValidatingAddress(true);
-    const isRealAddress = await validateAddressWithAPI(location);
-    setIsValidatingAddress(false);
-
-    if (!isRealAddress) {
-      setSubmitError(`Please enter a valid actual address within ${SERVICE_AREA_LABEL}.`);
+    const isAddressValid = await validateEnteredLocation();
+    if (!isAddressValid) {
+      setSubmitError("Please verify the service address before booking.");
       return;
     }
 
@@ -244,6 +519,8 @@ const BookingModal = ({
           bookingDateTime: selectedDateTime.toISOString(),
           address: location.trim(),
           coordinates,
+          serviceArea: validatedServiceArea,
+          postalCode: validatedPostalCode || undefined,
           pricingType,
           hours,
           formData,
@@ -491,53 +768,61 @@ const BookingModal = ({
       setGuestName("");
       setGuestEmail("");
       setGuestEmailConfirm("");
+      setLoadingLocation(false);
       setIsValidatingAddress(false);
+      setLocationStatus("idle");
+      setLocationMessage("");
+      setValidatedLocation("");
+      setValidatedServiceArea(null);
+      setValidatedPostalCode("");
     }
   }, [isOpen]);
 
   const getCurrentLocation = () => {
+    if (!window.isSecureContext) {
+      showLocationError(
+        "Current location requires HTTPS. Open the live HTTPS website or type the address manually.",
+      );
+      return;
+    }
+
     if (!navigator.geolocation) {
-      setSubmitError("Geolocation not supported. Please type your address.");
+      showLocationError(
+        "This browser does not support current location. Please type the address manually.",
+      );
       return;
     }
 
     setLoadingLocation(true);
     setSubmitError(null);
+    setLocationStatus("idle");
+    setLocationMessage("Waiting for location permission...");
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
 
-        if (!isSupportedCoordinates(latitude, longitude)) {
-          setCoordinates(null);
-          setLocation("");
-          setLoadingLocation(false);
-          alert(`Your current location is outside ${SERVICE_AREA_LABEL}.`);
-          return;
-        }
-
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
+          const result = await reverseGeocodeServiceAddress(
+            latitude,
+            longitude,
           );
-          const data = await res.json();
-          const address =
-            typeof data?.display_name === "string" ? data.display_name : "";
 
-          // Simple location check based on string for current location button
-          if (!isSupportedAddress(address)) {
-            setCoordinates(null);
-            setLocation("");
-            alert(`Your current location is outside ${SERVICE_AREA_LABEL}.`);
-          } else {
-            setCoordinates({ lat: latitude, lng: longitude });
-            setLocation(address);
+          if (!result.valid) {
+            showLocationError(result.message);
+            return;
           }
-        } catch {
-          setCoordinates(null);
-          setLocation("");
-          setSubmitError(
-            "We could not verify this location. Please type your service address.",
+
+          applyValidLocation({
+            ...result,
+            coordinates: { lat: latitude, lng: longitude },
+          });
+        } catch (error) {
+          console.error("Reverse geocoding failed:", error);
+          showLocationError(
+            error instanceof Error
+              ? error.message
+              : "We could not verify this location. Please type your service address.",
           );
         } finally {
           setLoadingLocation(false);
@@ -546,14 +831,20 @@ const BookingModal = ({
       (error) => {
         console.warn("Geolocation error:", error.message);
         setLoadingLocation(false);
-        setSubmitError(
-          "We could not read your location. Please type your service address.",
+        const messages: Record<number, string> = {
+          1: "Location permission was denied. Allow location access in your browser or type the address manually.",
+          2: "Your location is currently unavailable. Please try again or type the address manually.",
+          3: "Location detection timed out. Please try again or type the address manually.",
+        };
+        showLocationError(
+          messages[error.code] ||
+            "We could not read your location. Please type the address manually.",
         );
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
+        timeout: 15000,
+        maximumAge: 60_000,
       },
     );
   };
@@ -1073,12 +1364,22 @@ const BookingModal = ({
                       </h4>
 
                       <button
+                        type="button"
                         onClick={getCurrentLocation}
-                        className="w-full mb-3 p-3 rounded-xl border border-slate-200 bg-white text-blue-600 font-semibold text-sm flex items-center justify-center gap-2 hover:bg-blue-50 transition"
+                        disabled={loadingLocation || isValidatingAddress}
+                        className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {loadingLocation
-                          ? "Getting location..."
-                          : "Use Current Location"}
+                        {loadingLocation ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" />
+                            Getting current location...
+                          </>
+                        ) : (
+                          <>
+                            <MapPin size={16} />
+                            Choose My Current Location
+                          </>
+                        )}
                       </button>
 
                       <div className="relative">
@@ -1087,16 +1388,78 @@ const BookingModal = ({
                           onChange={(e) => {
                             setLocation(e.target.value);
                             setCoordinates(null);
+                            setValidatedLocation("");
+                            setValidatedServiceArea(null);
+                            setValidatedPostalCode("");
+                            setLocationStatus("idle");
+                            setLocationMessage("");
                           }}
-                          placeholder="Enter Calgary-region service address"
-                          className="w-full p-3 rounded-xl border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                          autoComplete="street-address"
+                          aria-describedby="service-location-message"
+                          aria-invalid={locationStatus === "error"}
+                          placeholder="Street, city and postal code"
+                          className={`w-full rounded-xl border bg-white p-3 pr-10 text-sm outline-none transition focus:ring-2 ${
+                            locationStatus === "valid"
+                              ? "border-emerald-400 focus:ring-emerald-200"
+                              : locationStatus === "error"
+                                ? "border-red-400 focus:ring-red-200"
+                                : "border-slate-200 focus:ring-blue-500"
+                          }`}
                         />
-                        {location && (
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-600">
-                            ✓
-                          </span>
+                        {locationStatus === "valid" && (
+                          <CheckCircle2
+                            size={18}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600"
+                          />
                         )}
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={validateEnteredLocation}
+                        disabled={
+                          location.trim().length < 6 ||
+                          loadingLocation ||
+                          isValidatingAddress
+                        }
+                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                      >
+                        {isValidatingAddress ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" />
+                            Checking address...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 size={16} />
+                            Check Service Availability
+                          </>
+                        )}
+                      </button>
+
+                      {locationMessage && (
+                        <div
+                          id="service-location-message"
+                          role={locationStatus === "error" ? "alert" : "status"}
+                          className={`mt-3 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold leading-5 ${
+                            locationStatus === "valid"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : locationStatus === "error"
+                                ? "border-red-200 bg-red-50 text-red-700"
+                                : "border-blue-100 bg-blue-50 text-blue-700"
+                          }`}
+                        >
+                          {locationStatus === "valid" ? (
+                            <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+                          ) : locationStatus === "error" ? (
+                            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                          ) : (
+                            <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+                          )}
+                          <span>{locationMessage}</span>
+                        </div>
+                      )}
+
                       <p className="mt-2 text-[11px] leading-5 text-slate-500">
                         Online booking is available in {SERVICE_AREA_LABEL}.
                         Addresses outside this service area cannot be submitted.
@@ -1388,9 +1751,17 @@ const BookingModal = ({
             </button>
             <button
               onClick={step === totalSteps ? handleConfirm : nextStep}
-              disabled={isSubmitting || isValidatingAddress}
+              disabled={
+                !isStepValid() ||
+                isSubmitting ||
+                isValidatingAddress ||
+                loadingLocation
+              }
               className={`flex-1 py-3 rounded-xl text-white text-xs font-black flex items-center justify-center gap-2 shadow-xl shadow-blue-200 transition-all ${
-                !isStepValid() || isSubmitting || isValidatingAddress
+                !isStepValid() ||
+                isSubmitting ||
+                isValidatingAddress ||
+                loadingLocation
                   ? "bg-blue-300 cursor-not-allowed"
                   : "bg-blue-600 hover:bg-blue-700"
               }`}
