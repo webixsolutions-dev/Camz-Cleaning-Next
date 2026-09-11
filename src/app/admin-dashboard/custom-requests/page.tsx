@@ -28,14 +28,51 @@ type RequestRow = {
   phone: string;
   address: string;
   service_types: string[];
-  property_details: Record<string, string>;
-  checklist: Record<string, ChecklistSection | string[]>;
+  property_details: Record<string, unknown> & { estimate?: EstimatorSnapshot };
+  checklist: Record<string, unknown> & {
+    selected_tasks?: SelectedTask[];
+    photo_paths?: string[];
+    priority_order?: string[];
+    carpet?: Record<string, unknown>;
+    consent?: { terms_accepted?: boolean; accepted_at?: string };
+  };
   if_time_allows: string | null;
   additional_notes: string | null;
   preferred_contact: string;
   preferred_date: string | null;
   status: string;
   created_at: string;
+};
+
+type SelectedTask = {
+  task_id: string;
+  category: string;
+  label: string;
+  minutes_min: number;
+  minutes_max: number;
+  quantity: number;
+  quantity_basis: string;
+};
+
+type EstimatorSnapshot = {
+  mode: "time" | "price";
+  general_minutes_min: number;
+  general_minutes_max: number;
+  cleaner_count: number;
+  onsite_minutes_min: number;
+  onsite_minutes_max: number;
+  base_price_cents: number;
+  general_price_min_cents: number | null;
+  general_price_max_cents: number | null;
+  carpet_price_cents: number | null;
+  subtotal_min_cents: number | null;
+  subtotal_max_cents: number | null;
+  gst_min_cents: number | null;
+  gst_max_cents: number | null;
+  total_min_cents: number | null;
+  total_max_cents: number | null;
+  requires_manual_quote: boolean;
+  budget_choice: string;
 };
 
 type RangeKey = "24h" | "7d" | "30d" | "all";
@@ -61,6 +98,7 @@ const rangeFilters: Array<{
 ];
 
 function serviceLabel(id: string) {
+  if (id === "professional_cleaning") return "Cleaning estimator";
   return serviceTypes.find((service) => service.id === id)?.name || id;
 }
 
@@ -70,6 +108,25 @@ function formatValue(value: unknown) {
   }
 
   return String(value).replaceAll("_", " ");
+}
+
+function durationValue(minutes: number | null | undefined) {
+  const value = Math.max(0, Number(minutes) || 0);
+  const hours = Math.floor(value / 60);
+  const mins = value % 60;
+  return `${hours ? `${hours} hr` : ""}${hours && mins ? " " : ""}${mins ? `${mins} min` : ""}` || "0 min";
+}
+
+function cents(value: number | null | undefined) {
+  return typeof value === "number" ? new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value / 100) : "—";
+}
+
+function centsRange(min: number | null | undefined, max: number | null | undefined) {
+  return min === max ? cents(min) : `${cents(min)} – ${cents(max)}`;
+}
+
+function SummaryMetric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-lg border border-blue-100 bg-white p-3"><div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-400">{label}</div><div className="mt-1 text-[11px] font-bold text-[#13263A]">{value}</div></div>;
 }
 
 function normalizeRange(value?: string): RangeKey {
@@ -180,9 +237,13 @@ export default async function CustomRequestsPage({
     const photoUrls: Record<string, string> = {};
 
     if (selected) {
-      const paths = Object.values(selected.checklist || {}).flatMap((section) =>
-        Array.isArray(section) ? [] : section.photo_paths || [],
-      );
+      const currentPaths = Array.isArray(selected.checklist?.photo_paths) ? selected.checklist.photo_paths : [];
+      const legacyPaths = Object.values(selected.checklist || {}).flatMap((section) => {
+        if (!section || Array.isArray(section) || typeof section !== "object") return [];
+        const candidate = (section as ChecklistSection).photo_paths;
+        return Array.isArray(candidate) ? candidate : [];
+      });
+      const paths = Array.from(new Set([...currentPaths, ...legacyPaths]));
 
       await Promise.all(
         paths.map(async (path) => {
@@ -337,6 +398,19 @@ export default async function CustomRequestsPage({
               </header>
 
               <div className="space-y-5 p-5 sm:p-6">
+                {selected.property_details.estimate && (() => {
+                  const estimate = selected.property_details.estimate;
+                  return <section className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-[#13263A]">Estimator summary</h3><div className="flex gap-2"><span className="rounded-md bg-white px-2 py-1 text-[9px] font-extrabold uppercase text-[#0B4E9B]">{estimate.mode === "price" ? "Time + price" : "Time only"}</span>{estimate.requires_manual_quote && <span className="rounded-md bg-amber-100 px-2 py-1 text-[9px] font-extrabold uppercase text-amber-800">Manual review</span>}</div></div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      <SummaryMetric label="General labour" value={`${durationValue(estimate.general_minutes_min)} – ${durationValue(estimate.general_minutes_max)}`} />
+                      <SummaryMetric label={`On-site · ${estimate.cleaner_count} cleaner${estimate.cleaner_count === 1 ? "" : "s"}`} value={`${durationValue(estimate.onsite_minutes_min)} – ${durationValue(estimate.onsite_minutes_max)}`} />
+                      <SummaryMetric label="General cleaning" value={estimate.mode === "price" ? centsRange(estimate.general_price_min_cents, estimate.general_price_max_cents) : "Price hidden"} />
+                      <SummaryMetric label="Estimated total incl. GST" value={estimate.mode === "price" ? centsRange(estimate.total_min_cents, estimate.total_max_cents) : "Quote requested"} />
+                    </div>
+                    {estimate.mode === "price" && <div className="mt-3 grid gap-2 rounded-lg border border-blue-100 bg-white p-3 text-[10px] text-slate-600 sm:grid-cols-4"><span>Base: <b>{cents(estimate.base_price_cents)}</b></span><span>Carpet: <b>{cents(estimate.carpet_price_cents)}</b></span><span>Subtotal: <b>{centsRange(estimate.subtotal_min_cents, estimate.subtotal_max_cents)}</b></span><span>GST: <b>{centsRange(estimate.gst_min_cents, estimate.gst_max_cents)}</b></span></div>}
+                  </section>;
+                })()}
                 {/* SERVICES */}
                 <section>
                   <h3 className="font-bold text-[#13263A]">
@@ -362,7 +436,7 @@ export default async function CustomRequestsPage({
                   </h3>
 
                   <div className="mt-2 grid overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-3">
-                    {Object.entries(selected.property_details || {}).map(
+                    {Object.entries(selected.property_details || {}).filter(([key]) => key !== "estimate").map(
                       ([key, value]) => (
                         <div
                           key={key}
@@ -389,13 +463,20 @@ export default async function CustomRequestsPage({
                   </h3>
 
                   <div className="mt-2 space-y-3">
+                    {!!selected.checklist.selected_tasks?.length && Object.entries(
+                      selected.checklist.selected_tasks.reduce<Record<string, SelectedTask[]>>((groups, task) => {
+                        (groups[task.category] ||= []).push(task); return groups;
+                      }, {}),
+                    ).map(([category, tasks]) => <div key={category} className="rounded-lg border border-slate-200 bg-white p-3.5"><div className="text-[11px] font-bold capitalize text-[#0B4E9B]">{sectionLabels[category] || category}</div><ul className="mt-2.5 grid gap-2 sm:grid-cols-2">{tasks.map(task => <li key={task.task_id} className="flex items-start gap-2 text-[10px] text-slate-700"><CheckSquare2 className="mt-0.5 shrink-0 text-emerald-600" size={14}/><span>{task.label}<span className="block text-[9px] text-slate-400">Qty {task.quantity} · {task.minutes_min}–{task.minutes_max} min {task.quantity_basis === "item" ? "each" : "base"}</span></span></li>)}</ul></div>)}
                     {Object.entries(selected.checklist || {}).map(
                       ([areaId, rawSection]) => {
+                        if (["selected_tasks","photo_paths","priority_order","carpet","consent"].includes(areaId)) return null;
+                        if (!rawSection || (typeof rawSection !== "object" && !Array.isArray(rawSection))) return null;
                         const section: ChecklistSection = Array.isArray(
                           rawSection,
                         )
                           ? { tasks: rawSection }
-                          : rawSection;
+                          : rawSection as ChecklistSection;
 
                         if (
                           !section.tasks?.length &&
@@ -472,6 +553,8 @@ export default async function CustomRequestsPage({
                       },
                     )}
                   </div>
+                  {!!selected.checklist.priority_order?.length && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-[10px] text-slate-600"><b className="text-[#13263A]">Customer priority:</b> {selected.checklist.priority_order.map(formatValue).join(" → ")}</p>}
+                  {!!selected.checklist.photo_paths?.length && <div className="mt-3 flex flex-wrap gap-2">{selected.checklist.photo_paths.map((path,index)=>photoUrls[path]?<a key={path} href={photoUrls[path]} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-[#0B4E9B]"><FileImage size={14}/>Photo {index+1}</a>:null)}</div>}
                 </section>
 
                 {/* NOTES */}
@@ -705,8 +788,11 @@ export default async function CustomRequestsPage({
             <div className="divide-y divide-slate-100">
               {requests.map((request) => {
                 const styles = requestStatusStyles(request.status);
+                const listEstimate = request.property_details?.estimate;
 
-                const serviceText = request.service_types?.length
+                const serviceText = listEstimate
+                  ? `${listEstimate.mode === "price" ? "Time + price" : "Time only"} · ${durationValue(listEstimate.general_minutes_min)}–${durationValue(listEstimate.general_minutes_max)}${listEstimate.mode === "price" ? ` · ${centsRange(listEstimate.total_min_cents, listEstimate.total_max_cents)}` : ""}`
+                  : request.service_types?.length
                   ? request.service_types.map(serviceLabel).join(", ")
                   : "Custom cleaning";
 

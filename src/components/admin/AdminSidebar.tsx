@@ -145,6 +145,12 @@ const groups: AdminGroup[] = [
         href: "/admin-dashboard/manage/settings",
         icon: Settings2,
       },
+      {
+        label: "Estimator Settings",
+        href: "/admin-dashboard/estimator-settings",
+        icon: Settings2,
+        roles: ["admin"],
+      },
     ],
   },
 ];
