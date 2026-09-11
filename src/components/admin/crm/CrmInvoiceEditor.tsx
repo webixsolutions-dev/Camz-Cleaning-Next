@@ -163,9 +163,10 @@ export default function CrmInvoiceEditor({
         if (!paymentAmount && current.balance_cents > 0) {
           setPaymentAmount(centsToDollars(current.balance_cents));
         }
+        const invoiceItems = current.crm_invoice_items || [];
         setLines(
-          (current.crm_invoice_items || []).length
-            ? current.crm_invoice_items.map((item) => ({
+          invoiceItems.length
+            ? invoiceItems.map((item) => ({
                 id: item.id,
                 description: item.description,
                 quantity: String(item.quantity),

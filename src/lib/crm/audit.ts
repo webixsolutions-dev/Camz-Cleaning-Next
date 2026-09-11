@@ -1,6 +1,6 @@
 type AuditClient = {
   from: (table: string) => {
-    insert: (row: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+    insert: (row: Record<string, unknown>) => PromiseLike<{ error: { message: string } | null }>;
   };
 };
 

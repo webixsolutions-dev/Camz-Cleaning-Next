@@ -12,7 +12,7 @@ function getServiceClient() {
 }
 
 async function findAuthUser(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: NonNullable<ReturnType<typeof getServiceClient>>,
   email: string,
 ) {
   const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
