@@ -318,17 +318,17 @@ const invoiceCss = `
   .meta-value { color: #222; font-weight: 700; }
   .rule { height: 10px; background: #8a9aab; margin: 28px 0 32px; }
   h1 { font-size: 34px; margin: 0 0 28px; font-weight: 800; letter-spacing: -0.03em; overflow-wrap: anywhere; }
-  .summary { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 24px; padding: 18px 0 22px; border-top: 1px solid #d7dde3; border-bottom: 1px solid #d7dde3; }
+  .summary { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 24px; padding: 8px 0 28px; }
   .summary h3 { margin: 0 0 10px; font-size: 13px; }
   .summary p { margin: 0 0 4px; font-size: 13px; color: #374151; overflow-wrap: anywhere; }
   table { width: 100%; border-collapse: collapse; }
   .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .items { margin-top: 8px; }
-  .items th, .payments th { text-align: left; font-size: 13px; padding: 16px 0; border-bottom: 1px solid #d7dde3; }
-  .items td, .payments td { padding: 16px 0; border-bottom: 1px solid #d7dde3; font-size: 13px; }
+  .items th, .payments th { text-align: left; font-size: 13px; padding: 10px 0 14px; border: 0; }
+  .items td, .payments td { padding: 10px 0; border: 0; font-size: 13px; }
   .num { text-align: right; white-space: nowrap; }
-  .subtotal td { border-bottom: 1px solid #d7dde3; }
-  .total td { font-size: 22px; font-weight: 800; padding-top: 22px; border-bottom: 0; }
+  .subtotal td { border: 0; padding-top: 14px; }
+  .total td { font-size: 22px; font-weight: 800; padding-top: 18px; border: 0; }
   .payments { margin-top: 18px; }
   .notes { margin-top: 28px; font-size: 13px; color: #374151; overflow-wrap: anywhere; }
   .void { margin-top: 40px; text-align: center; font-size: 48px; letter-spacing: 12px; color: #e11d48; }
