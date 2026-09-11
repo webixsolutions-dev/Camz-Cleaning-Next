@@ -1,4 +1,6 @@
+import { ensureCrmCustomerForUser } from "@/lib/customers/syncCrmCustomer";
 import { enforceMutationSecurity } from "@/lib/security/http";
+import { normalizeCustomerCode } from "@/lib/customers/customerCode";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
@@ -34,6 +36,54 @@ function splitAddress(address: string) {
   return { address_line: parts.slice(0, -1).join(", "), city: parts.at(-1) || "" };
 }
 
+export async function GET(request: NextRequest) {
+  if (!(await authorizeAdmin())) return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+  const admin = getServiceClient();
+  if (!admin) return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY is not configured on the server." }, { status: 503 });
+
+  const url = new URL(request.url);
+  const id = url.searchParams.get("id")?.trim() || "";
+  const code = normalizeCustomerCode(url.searchParams.get("code") || url.searchParams.get("q") || "");
+  if (!id && !code) {
+    return NextResponse.json({ error: "Pass a 4-digit customer ID (?code=0001) or customer uuid (?id=)." }, { status: 400 });
+  }
+
+  try {
+    let query = admin
+      .from("users")
+      .select("id, customer_code, name, email, phone_number, source, created_at, is_blocked, approval_status, verified, role")
+      .eq("role", "customer");
+    query = id ? query.eq("id", id) : query.eq("customer_code", code);
+    const { data: customer, error } = await query.maybeSingle();
+    if (error) {
+      console.error("Customer lookup failed:", error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (!customer) return NextResponse.json({ error: "No customer found for that ID." }, { status: 404 });
+
+    const [{ data: addresses }, { data: jobs }] = await Promise.all([
+      admin.from("addresses").select("id, label, address_line, city, is_default").eq("user_id", customer.id).order("is_default", { ascending: false }),
+      admin
+        .from("jobs")
+        .select("id, service_name, service_type, date, status, address, total_price, final_price, price, created_at")
+        .eq("customer_id", customer.id)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+
+    return NextResponse.json({
+      customer: {
+        ...customer,
+        addresses: addresses || [],
+        bookings: jobs || [],
+      },
+    });
+  } catch (err) {
+    console.error("Customer GET failed:", err);
+    return NextResponse.json({ error: "Unable to look up that customer." }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   const securityError = await enforceMutationSecurity(request, { bucket: "customers-post", limit: 60, windowSeconds: 60 });
   if (securityError) return securityError;
@@ -52,7 +102,7 @@ export async function POST(request: NextRequest) {
     email,
     password: temporaryPassword,
     email_confirm: true,
-    user_metadata: { name, source: body.source || "Manual" },
+    user_metadata: { name, role: "customer", source: body.source || "Manual" },
   });
   if (authError || !authData.user) return NextResponse.json({ error: authError?.message || "Unable to create authentication account." }, { status: 400 });
 
@@ -73,12 +123,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: profileError.message }, { status: 400 });
   }
 
-  if (body.address?.trim()) {
-    const parsed = splitAddress(body.address);
-    const { error: addressError } = await admin.from("addresses").insert({ user_id: authData.user.id, label: "home", ...parsed, is_default: true });
-    if (addressError) return NextResponse.json({ error: `Customer created, but address failed: ${addressError.message}` }, { status: 207 });
+  const { data: created } = await admin
+    .from("users")
+    .select("id, customer_code, name, email, phone_number")
+    .eq("id", authData.user.id)
+    .maybeSingle();
+
+  const parsed = body.address?.trim() ? splitAddress(body.address) : null;
+  if (parsed) {
+    const { error: addressError } = await admin.from("addresses").insert({
+      user_id: authData.user.id,
+      label: "home",
+      ...parsed,
+      is_default: true,
+    });
+    if (addressError) {
+      return NextResponse.json({ error: `Customer created, but address failed: ${addressError.message}` }, { status: 207 });
+    }
   }
-  return NextResponse.json({ id: authData.user.id });
+
+  const linked = created
+    ? await ensureCrmCustomerForUser(admin, created, parsed)
+    : { ok: false as const, error: "Profile missing" };
+
+  return NextResponse.json({
+    id: authData.user.id,
+    customer_code: created?.customer_code || (linked.ok ? linked.customer_code : null),
+    crm_customer_id: linked.ok ? linked.crm_customer_id : null,
+  });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -105,6 +177,11 @@ export async function PATCH(request: NextRequest) {
     const { data: existing } = await admin.from("addresses").select("id").eq("user_id", body.id).eq("is_default", true).maybeSingle();
     if (existing) await admin.from("addresses").update(parsed).eq("id", existing.id);
     else await admin.from("addresses").insert({ user_id: body.id, label: "home", ...parsed, is_default: true });
+    const { data: user } = await admin.from("users").select("id, customer_code, name, email, phone_number").eq("id", body.id).maybeSingle();
+    if (user) await ensureCrmCustomerForUser(admin, user, parsed);
+  } else {
+    const { data: user } = await admin.from("users").select("id, customer_code, name, email, phone_number").eq("id", body.id).maybeSingle();
+    if (user) await ensureCrmCustomerForUser(admin, user);
   }
   return NextResponse.json({ ok: true });
 }

@@ -17,6 +17,7 @@ export type CrmAddress = {
 
 export type CrmCustomer = {
   id: string;
+  customer_code?: string | null;
   display_name: string;
   legal_name: string | null;
   email: string | null;
@@ -71,7 +72,7 @@ export default function CrmCustomersClient() {
     const needle = query.trim().toLowerCase();
     if (!needle) return customers;
     return customers.filter((customer) =>
-      [customer.display_name, customer.email, customer.phone].join(" ").toLowerCase().includes(needle),
+      [customer.customer_code, customer.display_name, customer.email, customer.phone].join(" ").toLowerCase().includes(needle),
     );
   }, [customers, query]);
 
@@ -110,7 +111,7 @@ export default function CrmCustomersClient() {
   };
 
   return (
-    <div className="p-6">
+    <div className="overflow-x-hidden p-4 sm:p-6">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-slate-900">Invoice customers</h1>
@@ -131,7 +132,7 @@ export default function CrmCustomersClient() {
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search name, email, or phone"
+          placeholder="Search ID, name, email, or phone"
           className="h-11 w-full bg-transparent px-3 text-[12px] outline-none"
         />
       </div>
@@ -147,9 +148,26 @@ export default function CrmCustomersClient() {
             <p>No CRM customers yet.</p>
           </div>
         ) : (
-          <table className="w-full text-left text-[12px]">
+          <>
+            <div className="divide-y divide-slate-100 md:hidden">
+              {filtered.map((customer) => {
+                const address = customer.crm_customer_addresses?.[0];
+                return (
+                  <article key={customer.id} className="p-4">
+                    <p className="font-mono text-[12px] font-bold text-[#4A86F7]">{customer.customer_code || "—"}</p>
+                    <p className="mt-1 font-semibold text-slate-800">{customer.display_name}</p>
+                    <p className="mt-1 break-all text-[13px] text-slate-600">{customer.email || "-"}</p>
+                    <p className="mt-1 text-[13px] text-slate-600">{customer.phone || "-"}</p>
+                    <p className="mt-1 text-[13px] text-slate-500">{address ? [address.line1, address.city].filter(Boolean).join(", ") : "-"}</p>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[720px] text-left text-[12px]">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
+                <th className="px-4 py-3 font-semibold">ID</th>
                 <th className="px-4 py-3 font-semibold">Name</th>
                 <th className="px-4 py-3 font-semibold">Email</th>
                 <th className="px-4 py-3 font-semibold">Phone</th>
@@ -161,6 +179,7 @@ export default function CrmCustomersClient() {
                 const address = customer.crm_customer_addresses?.[0];
                 return (
                   <tr key={customer.id} className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-mono font-bold text-[#4A86F7]">{customer.customer_code || "—"}</td>
                     <td className="px-4 py-3 font-semibold text-slate-800">{customer.display_name}</td>
                     <td className="px-4 py-3">{customer.email || "-"}</td>
                     <td className="px-4 py-3">{customer.phone || "-"}</td>
@@ -170,12 +189,14 @@ export default function CrmCustomersClient() {
               })}
             </tbody>
           </table>
+            </div>
+          </>
         )}
       </div>
 
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <form onSubmit={submit} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 sm:items-center sm:p-4">
+          <form onSubmit={submit} className="max-h-[94vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
             <h2 className="mb-4 text-slate-900">New CRM customer</h2>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="sm:col-span-2 text-[11px] font-semibold text-slate-500">

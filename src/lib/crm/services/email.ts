@@ -3,6 +3,7 @@ import { isDeliverableEmail } from "@/lib/crm/emailAddress";
 import { loadOfficialLogoDataUri } from "@/lib/crm/logo";
 import { buildInvoiceEmailHtml, pickBillingAddress } from "@/lib/crm/pdf";
 import { writeCrmAudit } from "@/lib/crm/services/audit";
+import { renderImmutableInvoicePdf } from "@/lib/crm/services/pdf";
 
 type EmailClient = {
   from: (table: string) => any;
@@ -36,6 +37,15 @@ export async function deliverLoggedInvoiceEmail(options: {
     settings || {},
     settings?.logo_url || logoSrc,
   );
+  const pdf = await renderImmutableInvoicePdf({
+    supabase: options.supabase,
+    invoiceId: options.invoice.id,
+    actorId: options.userId,
+    logAsset: false,
+  });
+  if (!pdf.ok) {
+    return { ok: false as const, error: pdf.error || "Unable to attach the invoice PDF." };
+  }
 
   const { data: emailRow, error: insertError } = await options.supabase
     .from("crm_invoice_emails")
@@ -60,6 +70,13 @@ export async function deliverLoggedInvoiceEmail(options: {
     subject,
     html,
     replyTo: settings?.reply_to_email || settings?.email,
+    attachments: [
+      {
+        filename: pdf.filename,
+        content: pdf.pdfBytes,
+        contentType: "application/pdf",
+      },
+    ],
   });
   const { error: statusError } = await options.supabase
     .from("crm_invoice_emails")
@@ -75,7 +92,13 @@ export async function deliverLoggedInvoiceEmail(options: {
   await options.supabase.from("crm_invoice_events").insert({
     invoice_id: options.invoice.id,
     event_type: options.reminder ? "reminder_sent" : "emailed",
-    payload: { to, status: sent.ok ? "sent" : "failed", email_id: emailRow.id },
+    payload: {
+      to,
+      status: sent.ok ? "sent" : "failed",
+      email_id: emailRow.id,
+      pdf_attached: true,
+      pdf_filename: pdf.filename,
+    },
     created_by: options.userId,
   });
 
@@ -83,7 +106,7 @@ export async function deliverLoggedInvoiceEmail(options: {
     entity_type: "crm_invoice_emails",
     entity_id: emailRow.id,
     action: sent.ok ? "delivered" : "failed",
-    after: { to, subject, status: sent.ok ? "sent" : "failed" },
+    after: { to, subject, status: sent.ok ? "sent" : "failed", pdf_filename: pdf.filename },
     actor_id: options.userId,
   });
 

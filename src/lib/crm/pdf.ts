@@ -32,6 +32,7 @@ export type InvoiceLike = {
   balance_cents?: number;
   crm_customers?: {
     display_name?: string | null;
+    customer_code?: string | null;
     email?: string | null;
     phone?: string | null;
     crm_customer_addresses?: InvoiceAddress[] | null;
@@ -172,16 +173,21 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
     <header class="letterhead">
       <div class="brand">
         ${logo}
-        <div>
+        <div class="brand-copy">
           <div class="company">${escapeHtml(companyName)}</div>
-          <div class="contact">${escapeHtml(companyEmail)} | ${escapeHtml(companyPhone)}</div>
+          <div class="contact">${escapeHtml(companyEmail)}</div>
+          <div class="contact">${escapeHtml(companyPhone)}</div>
           ${company.tax_number ? `<div class="contact">GST ${escapeHtml(company.tax_number)}</div>` : ""}
           ${[company.address_line1, company.address_line2, [company.city, company.province].filter(Boolean).join(" "), company.postal_code].filter(Boolean).map((line) => `<div class="contact">${escapeHtml(line)}</div>`).join("")}
         </div>
       </div>
       <div class="meta">
-        <div>Invoice #${escapeHtml(number)}</div>
-        ${issueDate ? `<div class="muted">Issue date</div><div>${issueDate}</div>` : ""}
+        <div class="meta-block">
+          <div class="muted">Invoice</div>
+          <div class="meta-value">#${escapeHtml(number)}</div>
+        </div>
+        ${customer?.customer_code ? `<div class="meta-block"><div class="muted">Customer ID</div><div class="meta-value">${escapeHtml(customer.customer_code)}</div></div>` : ""}
+        ${issueDate ? `<div class="meta-block"><div class="muted">Issue date</div><div class="meta-value">${issueDate}</div></div>` : ""}
       </div>
     </header>
     <div class="rule"></div>
@@ -189,6 +195,7 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
     <section class="summary">
       <div>
         <h3>Customer</h3>
+        ${customer?.customer_code ? `<p>Customer ID ${escapeHtml(customer.customer_code)}</p>` : ""}
         <p>${escapeHtml(customer?.display_name || "Customer")}</p>
         ${customer?.email ? `<p>${escapeHtml(customer.email)}</p>` : ""}
         ${customer?.phone ? `<p>${escapeHtml(customer.phone)}</p>` : ""}
@@ -205,6 +212,7 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
         <p>${fullyPaid ? formatMoney(paid) : formatMoney(balance)}</p>
       </div>
     </section>
+    <div class="table-wrap">
     <table class="items">
       <thead>
         <tr>
@@ -229,12 +237,13 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
         <tr class="total"><td colspan="3">Balance due</td><td class="num">${formatMoney(balance)}</td></tr>` : ""}
       </tbody>
     </table>
+    </div>
     ${
       paymentRows
-        ? `<table class="payments">
+        ? `<div class="table-wrap"><table class="payments">
             <thead><tr><th>Payments</th><th></th></tr></thead>
             <tbody>${paymentRows}</tbody>
-          </table>`
+          </table></div>`
         : ""
     }
     ${invoice.notes ? `<p class="notes"><strong>Notes</strong><br/>${escapeHtml(invoice.notes)}</p>` : ""}
@@ -279,7 +288,7 @@ const invoiceCss = `
     color: #13263A;
     border: 1px solid #d5deea;
   }
-  .page { padding: 24px; }
+  .page { padding: 24px; overflow-x: hidden; }
   .sheet {
     width: 816px;
     max-width: 100%;
@@ -288,23 +297,32 @@ const invoiceCss = `
     padding: 48px 56px 64px;
     box-shadow: 0 18px 50px rgba(19,38,58,0.08);
   }
-  .letterhead { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
-  .brand { display: flex; gap: 14px; align-items: center; }
-  .logo { width: 72px; height: 72px; object-fit: contain; }
+  .letterhead {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(140px, auto);
+    gap: 20px 24px;
+    align-items: start;
+  }
+  .brand { display: flex; gap: 14px; align-items: flex-start; min-width: 0; }
+  .brand-copy { min-width: 0; }
+  .logo { width: 72px; height: 72px; object-fit: contain; flex-shrink: 0; }
   .logo-fallback {
     width: 72px; height: 72px; border-radius: 12px; background: #e8f3ff;
     display: flex; align-items: center; justify-content: center;
-    color: #00B7EB; font-size: 28px; font-weight: 800;
+    color: #00B7EB; font-size: 28px; font-weight: 800; flex-shrink: 0;
   }
-  .company { font-size: 15px; color: #222; }
-  .contact, .muted, .meta { font-size: 13px; color: #4b5563; }
-  .meta { text-align: right; font-size: 13px; }
+  .company { font-size: 15px; color: #222; overflow-wrap: anywhere; }
+  .contact, .muted { font-size: 13px; color: #4b5563; overflow-wrap: anywhere; }
+  .meta { text-align: right; font-size: 13px; color: #4b5563; }
+  .meta-block { margin-bottom: 10px; }
+  .meta-value { color: #222; font-weight: 700; }
   .rule { height: 10px; background: #8a9aab; margin: 28px 0 32px; }
-  h1 { font-size: 34px; margin: 0 0 28px; font-weight: 800; letter-spacing: -0.03em; }
+  h1 { font-size: 34px; margin: 0 0 28px; font-weight: 800; letter-spacing: -0.03em; overflow-wrap: anywhere; }
   .summary { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 24px; padding: 18px 0 22px; border-top: 1px solid #d7dde3; border-bottom: 1px solid #d7dde3; }
   .summary h3 { margin: 0 0 10px; font-size: 13px; }
-  .summary p { margin: 0 0 4px; font-size: 13px; color: #374151; }
+  .summary p { margin: 0 0 4px; font-size: 13px; color: #374151; overflow-wrap: anywhere; }
   table { width: 100%; border-collapse: collapse; }
+  .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .items { margin-top: 8px; }
   .items th, .payments th { text-align: left; font-size: 13px; padding: 16px 0; border-bottom: 1px solid #d7dde3; }
   .items td, .payments td { padding: 16px 0; border-bottom: 1px solid #d7dde3; font-size: 13px; }
@@ -312,13 +330,28 @@ const invoiceCss = `
   .subtotal td { border-bottom: 1px solid #d7dde3; }
   .total td { font-size: 22px; font-weight: 800; padding-top: 22px; border-bottom: 0; }
   .payments { margin-top: 18px; }
-  .notes { margin-top: 28px; font-size: 13px; color: #374151; }
+  .notes { margin-top: 28px; font-size: 13px; color: #374151; overflow-wrap: anywhere; }
   .void { margin-top: 40px; text-align: center; font-size: 48px; letter-spacing: 12px; color: #e11d48; }
+  @media (max-width: 700px) {
+    .page { padding: 12px; }
+    .sheet { width: 100%; padding: 20px 16px 28px; box-shadow: none; }
+    .letterhead { grid-template-columns: 1fr; }
+    .meta { text-align: left; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .logo, .logo-fallback { width: 56px; height: 56px; }
+    h1 { font-size: 22px; margin-bottom: 16px; }
+    .rule { margin: 16px 0 18px; }
+    .summary { grid-template-columns: 1fr; gap: 16px; }
+    .items th, .items td, .payments th, .payments td { font-size: 12px; padding: 10px 6px 10px 0; }
+    .total td { font-size: 16px; padding-top: 14px; }
+    .void { font-size: 28px; letter-spacing: 6px; }
+  }
   @media print {
     body { background: white; }
     .toolbar { display: none !important; }
     .page { padding: 0; }
     .sheet { width: auto; box-shadow: none; padding: 0; }
+    .letterhead { grid-template-columns: minmax(0, 1fr) auto; }
+    .summary { grid-template-columns: 1.3fr 1fr 1fr; }
   }
 `;
 
@@ -329,8 +362,6 @@ export function buildInvoiceHtml(
   const number = invoice.invoice_number || "draft";
   const company = options?.company || {};
   const logoSrc = options?.logoSrc || "";
-  const preview = options?.preview !== false;
-  const filename = `Invoice-${number}.pdf`;
   const documentHtml = invoiceDocument(invoice, company, logoSrc);
 
   return `<!DOCTYPE html>
@@ -341,38 +372,7 @@ export function buildInvoiceHtml(
     <style>${invoiceCss}</style>
   </head>
   <body>
-    ${
-      preview
-        ? `<div class="toolbar no-print">
-            <button type="button" onclick="downloadInvoicePdf()">Download PDF</button>
-          </div>`
-        : ""
-    }
     <div class="page">${documentHtml}</div>
-    ${
-      preview
-        ? `<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
-           <script>
-             function downloadInvoicePdf() {
-               var sheet = document.getElementById("invoice-sheet");
-               var filename = ${JSON.stringify(filename)};
-               var button = document.querySelector(".toolbar button");
-               if (!sheet) return;
-               if (!window.html2pdf) {
-                 if (button) button.textContent = "Loading PDF...";
-                 return;
-               }
-               window.html2pdf().set({
-                 margin: [0.4, 0.4, 0.4, 0.4],
-                 filename: filename,
-                 image: { type: "jpeg", quality: 0.98 },
-                 html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-                 jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
-               }).from(sheet).save();
-             }
-           </script>`
-        : ""
-    }
   </body>
 </html>`;
 }
@@ -380,6 +380,7 @@ export function buildInvoiceHtml(
 export function buildInvoiceEmailHtml(invoice: InvoiceLike, company?: CompanyLike, logoSrc?: string) {
   return `
     <div style="font-family:Arial,Helvetica,sans-serif;padding:8px;max-width:816px;">
+      <p style="font-size:14px;color:#374151;margin:0 0 16px;">Please find your invoice attached as a PDF.</p>
       ${invoiceDocument(invoice, company || {}, logoSrc || "")}
     </div>
   `;

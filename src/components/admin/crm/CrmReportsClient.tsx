@@ -35,7 +35,7 @@ export default function CrmReportsClient() {
   if (!report) return <p className="p-6 text-slate-500">{error || "Loading reports..."}</p>;
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <h1 className="text-slate-900">Invoice reports</h1>
       {error ? <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{error}</p> : null}
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
