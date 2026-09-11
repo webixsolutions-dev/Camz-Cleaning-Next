@@ -56,7 +56,7 @@ export default function CrmInvoicesClient() {
   }, [invoices, query]);
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-slate-900">Invoices</h1>
@@ -84,7 +84,24 @@ export default function CrmInvoicesClient() {
             <p>No invoices yet.</p>
           </div>
         ) : (
-          <table className="w-full text-left text-[12px]">
+          <>
+            <div className="divide-y divide-slate-100 md:hidden">
+              {filtered.map((invoice) => (
+                <Link key={invoice.id} href={`/admin-dashboard/crm/invoices/${invoice.id}`} className="block p-4">
+                  <p className="font-bold text-[#4A86F7]">{invoice.invoice_number || "Draft"}</p>
+                  <p className="mt-1 text-[13px] text-slate-700">{invoice.crm_customers?.display_name || "-"}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${statusClass[invoice.status] || "bg-slate-100"}`}>
+                      {invoice.status}
+                    </span>
+                    <span>Total {formatCad(invoice.total_cents)}</span>
+                    <span>Balance {formatCad(invoice.balance_cents)}</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[640px] text-left text-[12px]">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-semibold">Number</th>
@@ -114,6 +131,8 @@ export default function CrmInvoicesClient() {
               ))}
             </tbody>
           </table>
+            </div>
+          </>
         )}
       </div>
     </div>

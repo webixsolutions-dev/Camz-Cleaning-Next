@@ -11,6 +11,7 @@ export default function PersonalInformationPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [customerCode, setCustomerCode] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -35,7 +36,7 @@ export default function PersonalInformationPage() {
         const supabase = createClient();
         const { data, error } = await supabase
           .from("users")
-          .select("name, phone_number")
+          .select("name, phone_number, customer_code")
           .eq("id", user.id)
           .single();
 
@@ -44,6 +45,7 @@ export default function PersonalInformationPage() {
         if (data) {
           setName(data.name || "");
           setPhone(data.phone_number || "");
+          setCustomerCode(data.customer_code || "");
         }
       } catch (err: any) {
         console.error("Error loading user data:", err);
@@ -119,7 +121,9 @@ export default function PersonalInformationPage() {
 
           <h2 className="mt-4 text-3xl font-bold">{name || "User"}</h2>
 
-          <p className="mt-1 text-sm text-slate-500">Customer Account</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {customerCode ? `Customer ID ${customerCode}` : "Customer Account"}
+          </p>
         </div>
 
         {/* Success Message */}
@@ -141,6 +145,17 @@ export default function PersonalInformationPage() {
 
         {/* Form */}
         <div className="space-y-5 rounded-[28px] border border-slate-200 bg-white p-5 md:p-6">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-600">
+              Customer ID
+            </label>
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3">
+              <p className="w-full font-mono text-sm font-bold tracking-[0.2em] text-[#4A86F7]">
+                {customerCode || "Pending"}
+              </p>
+            </div>
+          </div>
+
           {/* Full Name */}
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-600">

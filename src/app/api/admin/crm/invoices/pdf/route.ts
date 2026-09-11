@@ -5,7 +5,9 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   const { actor, supabase, error, status } = await getCrmActor();
   if (!actor) return NextResponse.json({ error }, { status });
-  const id = new URL(request.url).searchParams.get("id");
+  const url = new URL(request.url);
+  const id = url.searchParams.get("id");
+  const download = url.searchParams.get("download") === "1" || url.searchParams.get("format") === "pdf";
   if (!id) return NextResponse.json({ error: "Invoice id is required." }, { status: 400 });
 
   try {
@@ -13,9 +15,22 @@ export async function GET(request: NextRequest) {
       supabase,
       invoiceId: id,
       actorId: actor.userId,
+      logAsset: download,
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+
+    if (download) {
+      const bytes = new Uint8Array(result.pdfBytes);
+      return new NextResponse(bytes, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${result.filename}"`,
+          "Cache-Control": "no-store",
+          "X-CRM-Snapshot": result.snapshotUsed ? "revision" : "live-draft",
+        },
+      });
     }
 
     return new NextResponse(result.html, {

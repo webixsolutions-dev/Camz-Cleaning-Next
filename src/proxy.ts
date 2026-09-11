@@ -173,19 +173,19 @@ export async function proxy(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
 
-  // 🔥 THE MAGIC REDIRECT INTERCEPTOR 🔥
   if (path === "/dashboard" || path === "/dashboard/") {
     if (role === "admin") {
       return NextResponse.redirect(new URL("/admin-dashboard", request.url));
-    } else if (role === "data_entry" || role === "cleaner") {
-      // Data entry and cleaners only have access to records as per your earlier code
-      return NextResponse.redirect(new URL("/admin-dashboard/booking-records", request.url));
-    } else {
-      return NextResponse.redirect(new URL("/customer-dashboard", request.url));
     }
+    if (role === "data_entry") {
+      return NextResponse.redirect(new URL("/admin-dashboard/crm", request.url));
+    }
+    if (role === "cleaner") {
+      return NextResponse.redirect(new URL("/admin-dashboard/booking-records", request.url));
+    }
+    return NextResponse.redirect(new URL("/customer-dashboard", request.url));
   }
 
-  // Normal Protection Rules
   if (path.startsWith("/customer-dashboard") && role !== "customer") {
     return forbidden(request);
   }
@@ -193,10 +193,17 @@ export async function proxy(request: NextRequest) {
   if (path.startsWith("/admin-dashboard")) {
     if (role === "admin") {
       // full access
-    } else if (["cleaner", "data_entry"].includes(role)) {
-      if (!path.startsWith("/admin-dashboard/booking-records") && !path.startsWith("/admin-dashboard/before-after")) {
-        return forbidden(request);
-      }
+    } else if (role === "data_entry") {
+      const allowed =
+        path.startsWith("/admin-dashboard/crm") ||
+        path.startsWith("/admin-dashboard/booking-records") ||
+        path.startsWith("/admin-dashboard/before-after");
+      if (!allowed) return forbidden(request);
+    } else if (role === "cleaner") {
+      const allowed =
+        path.startsWith("/admin-dashboard/booking-records") ||
+        path.startsWith("/admin-dashboard/before-after");
+      if (!allowed) return forbidden(request);
     } else {
       return forbidden(request);
     }

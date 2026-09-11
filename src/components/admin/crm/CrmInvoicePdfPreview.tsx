@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, LoaderCircle } from "lucide-react";
 
 export default function CrmInvoicePdfPreview({ invoiceId }: { invoiceId: string }) {
-  const sheetRef = useRef<HTMLDivElement>(null);
   const [css, setCss] = useState("");
   const [sheetHtml, setSheetHtml] = useState("");
   const [filename, setFilename] = useState("Invoice.pdf");
@@ -47,40 +46,26 @@ export default function CrmInvoicePdfPreview({ invoiceId }: { invoiceId: string 
   }, [invoiceId]);
 
   const downloadPdf = async () => {
-    const sheet = sheetRef.current?.querySelector("#invoice-sheet") as HTMLElement | null;
-    if (!sheet) {
-      setError("Invoice is still loading.");
-      return;
-    }
     setDownloading(true);
     setError("");
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
-      const canvas = await html2canvas(sheet, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-      });
-      const image = canvas.toDataURL("image/jpeg", 0.98);
-      const pdf = new jsPDF({ unit: "pt", format: "letter", orientation: "portrait" });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 28;
-      const imgWidth = pageWidth - margin * 2;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let remaining = imgHeight;
-      let offset = margin;
-
-      pdf.addImage(image, "JPEG", margin, offset, imgWidth, imgHeight);
-      remaining -= pageHeight - margin * 2;
-      while (remaining > 0) {
-        offset -= pageHeight - margin;
-        pdf.addPage();
-        pdf.addImage(image, "JPEG", margin, offset, imgWidth, imgHeight);
-        remaining -= pageHeight - margin;
+      const response = await fetch(`/api/admin/crm/invoices/pdf/?id=${invoiceId}&download=1`, { cache: "no-store" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || "Could not download the PDF.");
       }
-      pdf.save(filename);
+      const blob = await response.blob();
+      const header = response.headers.get("Content-Disposition") || "";
+      const match = header.match(/filename="([^"]+)"/);
+      const name = match?.[1] || filename;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not download the PDF.");
     } finally {
@@ -89,22 +74,22 @@ export default function CrmInvoicePdfPreview({ invoiceId }: { invoiceId: string 
   };
 
   return (
-    <div className="min-h-screen bg-[#eef2f6]">
-      <div className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-slate-200 bg-white/95 px-6 py-4">
+    <div className="min-h-screen overflow-x-hidden bg-[#eef2f6]">
+      <div className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 sm:px-6 sm:py-4">
         <button
           type="button"
           disabled={loading || downloading || !sheetHtml}
           onClick={() => void downloadPdf()}
-          className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#4A86F7] px-5 text-[13px] font-bold text-white disabled:opacity-50"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#4A86F7] px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:px-5"
         >
           {downloading ? <LoaderCircle size={16} className="animate-spin" /> : <Download size={16} />}
           {downloading ? "Preparing PDF..." : "Download PDF"}
         </button>
       </div>
-      {error ? <p className="px-6 py-3 text-[13px] text-rose-700">{error}</p> : null}
-      {loading ? <p className="px-6 py-8 text-[13px] text-slate-500">Generating invoice preview...</p> : null}
+      {error ? <p className="px-4 py-3 text-[13px] text-rose-700 sm:px-6">{error}</p> : null}
+      {loading ? <p className="px-4 py-8 text-[13px] text-slate-500 sm:px-6">Generating invoice preview...</p> : null}
       <style>{css}</style>
-      <div ref={sheetRef} className="page" dangerouslySetInnerHTML={{ __html: sheetHtml }} />
+      <div className="page overflow-x-hidden" dangerouslySetInnerHTML={{ __html: sheetHtml }} />
     </div>
   );
 }

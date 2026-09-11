@@ -76,22 +76,22 @@ export default function CrmReconciliationClient({ isAdmin }: { isAdmin: boolean 
   };
 
   return (
-    <div className="p-6">
+    <div className="overflow-x-hidden p-4 sm:p-6">
       <h1 className="text-slate-900">Reconciliation</h1>
       <p className="mt-1 mb-5 text-slate-500">Compare received CRM payments against an expected total for a date range.</p>
       {error ? <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{error}</p> : null}
 
-      <form onSubmit={submit} className="mb-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-4">
-        <input type="date" required className="h-10 rounded-lg border px-3 text-[12px]" value={form.period_start} onChange={(event) => setForm((current) => ({ ...current, period_start: event.target.value }))} />
-        <input type="date" required className="h-10 rounded-lg border px-3 text-[12px]" value={form.period_end} onChange={(event) => setForm((current) => ({ ...current, period_end: event.target.value }))} />
-        <input className="h-10 rounded-lg border px-3 text-[12px]" placeholder="Expected cents (optional)" value={form.expected_cents} onChange={(event) => setForm((current) => ({ ...current, expected_cents: event.target.value }))} />
-        <button type="submit" className="h-10 rounded-xl bg-[#4A86F7] text-[12px] font-bold text-white">
+      <form onSubmit={submit} className="mb-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <input type="date" required className="min-h-11 rounded-lg border px-3 text-[16px] sm:text-[12px]" value={form.period_start} onChange={(event) => setForm((current) => ({ ...current, period_start: event.target.value }))} />
+        <input type="date" required className="min-h-11 rounded-lg border px-3 text-[16px] sm:text-[12px]" value={form.period_end} onChange={(event) => setForm((current) => ({ ...current, period_end: event.target.value }))} />
+        <input className="min-h-11 rounded-lg border px-3 text-[16px] sm:text-[12px]" placeholder="Expected cents (optional)" value={form.expected_cents} onChange={(event) => setForm((current) => ({ ...current, expected_cents: event.target.value }))} />
+        <button type="submit" className="min-h-11 rounded-xl bg-[#4A86F7] text-[12px] font-bold text-white">
           Create period
         </button>
       </form>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <table className="w-full text-left text-[12px]">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <table className="w-full min-w-[640px] text-left text-[12px]">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
               <th className="px-4 py-3">Period</th>

@@ -1,0 +1,1015 @@
+CAMZCLEANING
+
+CUSTOMER BOOKING EXPERIENCE
+
+Front-end Visual Blueprint
+
+42-page page-by-page UI/UX reference for web developers and designers
+
+Standard                                    Deep                       Customize                     Live estimate
+
+Routine upkeep                              Detailed reset             Choose exactly what you need  $179
+
+                                               Recommended                                           Deep clean • 4 man-hours
+                                                                                                      Kitchen detail
+                                                                                                      2 bathrooms
+                                                                                                      Baseboards
+
+                                                                                                                     Continue
+
+CAMZ Cleaning - Front-end visual blueprint                                                                                     01
+CAMZ CLEANING                                                                                                            Services Pricing How it works FAQ                       Book now
+
+DESIGN FOUNDATION
+
+The experience should feel simple even when pricing is complex.
+
+Customers see plain-language choices. CAMZ handles timing, labour logic, exclusions and review rules behind the scenes.         Progressive disclosure
+   Start with 3 choices                              Ask only what changes price
+1                                                 2                                                                      3
+
+   Standard, Deep, Customize                         Property, size, condition, extras                                             Show detail only after customer asks
+
+       Price follows the customer                        Never hide scope                                                       Escalate unusual jobs
+
+4                                                 5                                                                      6
+
+          Sticky live estimate on desktop/mobile            Review exactly what is included before                                 Manual review instead of risky instant quote
+                                                            payment
+
+CAMZ Cleaning - Front-end visual blueprint                                                                                                                                                 02
+CAMZ CLEANING                                                                                                                                  Services Pricing How it works FAQ  Book now
+
+ CUSTOMER JOURNEY
+
+One booking flow, six understandable steps.
+
+ Avoid branching into dozens of pages too early. The customer always knows where they are and what comes next.
+
+       01                                          02             03               04                                  05                             06
+
+Choose service                              Tell us about  Customize scope  Pick date/time                      Access + details               Review + pay
+                                            home
+
+                                            Conversion rule
+                                            Do not ask the customer to understand man-hours before they understand the service.
+
+                                            Show labour/time only as an estimate in the review summary, not as the primary shopping decision.
+
+CAMZ Cleaning - Front-end visual blueprint                                                                                                                                                  03
+LANDING
+
+Homepage - clear entry point
+
+The home page sells simplicity first. Pricing and customization become visible immediately after the CTA.
+
+                 camzcleaning.com/book                                                                     Developer notes
+
+CAMZ CLEANING                                                  Services Pricing FAQ      Book now              One primary CTA above the fold.
+                                                                                                               Avoid putting the full checklist on the homepage.
+A cleaner home,                                                          Deep Clean                            Use trust signals, not long paragraphs.
+without the guesswork.
+                                                                         from $179                                                                                                                                   04
+
+Choose your service, customize what matters, and see your estimate update.
+
+4.9/5                                       Insured            Flexible
+
+Customer rating                             Professional team  Customize online
+Build my cleaning                           View checklist
+                                                                             Live price
+
+                                                                         $214
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 1                                                                                                   Developer notes
+
+Booking entry screen                                                                                         Three service choices only.
+                                                                                                             Deep can be visually recommended without forcing it.
+Set expectations before asking questions: quick flow, editable choices, transparent estimate.                Continue remains disabled until a choice is made.
+
+                                       camzcleaning.com/book                                                                                                                                                       05
+
+Build your cleaning
+
+Standard Cleaning                           Deep Cleaning               Customize My
+About 3-5 minutes. You can change anything before checkout.             Cleaning
+
+Best for routine                            More detailed attention to  Choose individual areas and
+                                                                        add-ons.
+Whwaeetklyw/biwoeuekllydupkyeeop.u like helpbuilwdupitanhd?edges.
+                                                         Most popular
+
+                                                                                               Continue
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 1A
+
+Standard Cleaning selected
+
+Routine service should feel complete, not “cheap” or incomplete.
+
+camzcleaning.com/book                                                                             Developer notes
+
+Choose your cleaning level                       $129             Your cleaning                       Preload standard checklist.
+                                                                  Deep Cleaning                       Show “from” estimate until property details are known.
+You can still customize included tasks later.                                                         Customer can still add detailed tasks later.
+                                                                  2 bed • 2 bath • condo
+            Standard                                                                                                                                                                                        06
+                                                                  Estimated total
+                Routine maintenance
+                                                                  $129
+
+                                                                  Price updates as you customize
+
+                                                                                   Continue
+
+Deep                                             $179
+
+Detailed reset
+
+                        Customize                Varies
+
+                                 Build your own
+CAMZ Cleaning - Front-end visual blueprint
+STEP 1B
+
+Deep Cleaning selected
+
+Deep is the detailed reset package and should visually explain why it costs more.
+
+camzcleaning.com/book                                                                    Developer notes
+
+Choose your cleaning level                       $129    Your cleaning                       Highlight as recommended if it fits CAMZ sales strategy.
+                                                         Deep Cleaning                       Do not list 40 tasks at this stage.
+You can still customize included tasks later.                                                Use concise outcome language.
+                                                         2 bed • 2 bath • condo
+            Standard                                                                                                                                                                               07
+                                                         Estimated total
+                Routine maintenance
+                                                         $179
+
+                                                         Price updates as you customize
+
+                                                                          Continue
+
+Deep                                             $179
+
+Detailed reset
+
+                        Customize                Varies
+
+                                 Build your own
+CAMZ Cleaning - Front-end visual blueprint
+STEP 1C
+
+Customize My Cleaning selected
+
+Customization is for customers with a specific scope, without forcing a preset package.
+
+camzcleaning.com/book                                                                    Developer notes
+
+Choose your cleaning level                       $129    Your cleaning                       Start from an empty or smart-default checklist.
+                                                         Deep Cleaning                       Warn only when essentials are removed.
+You can still customize included tasks later.                                                Price can say “building estimate” until enough info exists.
+                                                         2 bed • 2 bath • condo
+            Standard                                                                                                                                                                               08
+                                                         Estimated total
+                Routine maintenance
+                                                         $146
+
+                                                         Price updates as you customize
+
+                                                                          Continue
+
+Deep                                             $179
+
+Detailed reset
+
+                        Customize                Varies
+
+                                 Build your own
+CAMZ Cleaning - Front-end visual blueprint
+STEP 2
+
+Property type
+
+Ask one question per screen when it materially changes price or workflow.
+
+camzcleaning.com/book                                                                                Developer notes
+
+What type of home are we cleaning?                                  Your cleaning                        Use large tap targets.
+                                                                     Deep Cleaning                       Apartment/condo may trigger parking/access questions later.
+This helps us estimate travel, setup and typical cleaning time.                                          “Other” can open a short description field.
+                                                                     2 bed • 2 bath • condo
+Apartment / Condo                           Townhouse                                                                                                                                                          09
+     Selected                                                        Estimated total
+
+                                                                 $179 Detached House
+
+                                                                     Price updates as you customize
+
+                                                                                      Continue
+
+Basement Suite                              Other
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 2
+
+Bedrooms + bathrooms
+
+Simple steppers are easier than dropdowns on mobile.
+
+                      camzcleaning.com/book                                   Your cleaning                   Developer notes
+                                                                              Deep Cleaning
+How many bedrooms and bathrooms?                                                                                  Bedrooms and full bathrooms affect base time.
+                                                                              2 bed • 2 bath • condo              Half bathrooms should have a smaller modifier.
+     Bedrooms                                                                                                     Set reasonable max before manual review.
+                                                                        −  2  Estim+ated total
+                                                                                                                                                                                                                        10
+     Bathrooms                                                                $179
+                                                                        −
+                                                                              Price updates as you customize
+
+                                                                                               Continue
+
+                                                                           2  +
+
+                  Half bathrooms                      −                    0  +
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 2
+
+Home size + condition
+
+Use customer-friendly bands rather than asking for exact square footage.
+
+camzcleaning.com/book                                                                                        Developer notes
+
+Size and current condition                                                Your cleaning                          Condition tooltips should include examples.
+                                                                          Deep Cleaning                          Heavy condition can trigger a surcharge or review.
+Approximate size                                                                                                 Avoid judgmental wording.
+                                                                          2 bed • 2 bath • condo
+                                                                                                                                                                                                                       11
+Under 900                                   900-1,499  1,500-1,999              Estimated total  2,500+
+                                                                       2,000-2,499
+
+                                                                          $179
+
+How would you describe the condition?                                     Price updates as you customize
+
+                                                                                           Continue
+
+Light                                                  Average            Heavy
+
+Maintained regularly                                   Normal buildup     Noticeable buildup / extra detail
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 2                                                                Your cleaning                   Developer notes
+                                                                      Deep Cleaning
+Pets + occupancy                                                                                          Pet hair can create an add-on later.
+                                                                      2 bed • 2 bath • condo              Smoking can affect manual review.
+Ask only operational questions that affect cleaning time or arrival.                                      Do not overload this page with policy text.
+                                                                      Estimated total
+                                       camzcleaning.com/book                                                                                                                                                    12
+                                                                      $O1the7r 9
+        A few details before customization
+                                                                      Price updates as you customize
+Pets in the home?  Yes - cat                      Yes - dog
+           No                                                                          Continue
+
+Home occupied during cleaning?
+
+No                 Yes
+
+              Any smoking indoors?
+CAMZ Cleaning - FrontN-eond visual blueprint Yes
+STEP 3
+
+Kitchen checklist
+
+Room-by-room customization starts with preselected tasks based on service tier.
+
+                                         camzcleaning.com/book                      Your cleaning                   Developer notes
+                                                                                    Deep Cleaning
+         Kitchen checklist                                                                                              Checkboxes are editable scope.
+                                                                                    2 bed • 2 bath • condo              Keep included tasks visually different from paid add-ons.
+               Included items are pre-selected. Turn off anything you do not need.                                      Sticky estimate remains visible.
+                                                                                    Estimated total
+             Countertops + backsplash                                                                                                                                                                                        13
+             Sink + faucet                                                         $179
+             Stovetop surface
+             Exterior appliances                                                   Price updates as you customize
+             Cabinet fronts
+CAMZ Cleaning - FroInnt-senidd evismuailcbrluoewpriantve                                            Continue
+STEP 3
+
+Kitchen detail options
+
+Paid extras and conditional review tasks appear only when relevant.
+
+                                         camzcleaning.com/book                              Your cleaning                   Developer notes
+                                                                                            Deep Cleaning
+         Kitchen - detailed options checklist                                                                                   Every paid task shows its price or “Review.”
+                                                                                            2 bed • 2 bath • condo              Exclusions appear in one-line helper text.
+               Included items are pre-selected. Turn off anything you do not need.                                              Changing a checkbox updates estimate immediately.
+                                                                                    +$35    Estimated total
+             Inside oven                                                           +$35                                                                                                                                              14
+                                                                                            $214
+                          Adds detailed degreasing time.
+                                                                                            Price updates as you customize
+                     Inside refrigerator
+                                                                                                             Continue
+                          Shelves/drawers emptied by customer.
+                                                                                    +$45
+                     Inside cabinets
+                                                                                    Review
+                          Empty cabinets only.
+                                                                                    Review
+                     Behind appliances
+
+                          Only if safely accessible.
+
+CAMZ Cleaning - FroHnt-eeandvyvisguarlebaluseepritnrteatment
+
+                          May require manual pricing.
+STEP 3
+
+Bathroom checklist
+
+Repeat a consistent component pattern across rooms.
+
+                                         camzcleaning.com/book                                  Your cleaning                       Developer notes
+                                                                                                 Deep Cleaning
+         Bathrooms checklist                                                                                                            Heavy soap scale is a modifier, not part of vague “deep” wording.
+                                                                                                   2 bed • 2 bath • condo               Per-bathroom pricing should be explicit.
+               Included items are pre-selected. Turn off anything you do not need.                 Estimated total                      Allow applying to all bathrooms.
+
+             Toilet + exterior                                                          $194                                                                                                                                                 15
+             Sink + vanity
+             Mirror + fixtures                                                                     Price updates as you customize
+             Tub / shower
+             Floor + edges                                                                                      Continue
+CAMZ Cleaning - FroHnt-eeandvyvissuaolabpluesprcinat le
+                                                                                    +$15
+                          Per affected bathroom
+STEP 3
+
+Bedroom checklist
+
+Keep routine tasks compact and optional detailed work separate.
+
+                                         camzcleaning.com/book                                  Your cleaning                       Developer notes
+                                                                                                 Deep Cleaning
+         Bedrooms checklist                                                                                                             Closet interiors require empty shelves.
+                                                                                                   2 bed • 2 bath • condo               Hide irrelevant bedroom options when bedroom count is zero.
+               Included items are pre-selected. Turn off anything you do not need.                 Estimated total                      Allow “apply to all bedrooms.”
+
+             Dust reachable surfaces                                                    $194                                                                                                                                                 16
+             Vacuum / mop floor
+             Mirrors                                                                               Price updates as you customize
+             Window sills
+             Baseboards                                                                                         Continue
+CAMZ Cleaning - FroCnt-leonsdevtissuahl eblluveeprsint
+                                                                                    +$10
+                          Empty shelves only
+STEP 3
+
+Living + dining checklist
+
+Shared spaces follow the same interaction pattern to reduce learning effort.
+
+                                         camzcleaning.com/book                                  Your cleaning                       Developer notes
+                                                                                                 Deep Cleaning
+         Living + dining checklist                                                                                                      Keep labels short.
+                                                                                                   2 bed • 2 bath • condo               Fixtures require reachability constraints.
+               Included items are pre-selected. Turn off anything you do not need.                 Estimated total                      Tooltips can explain standard ceiling height.
+
+             Dust furniture surfaces                                                    $204                                                                                                                                                 17
+             Vacuum / mop
+             Window sills                                                                          Price updates as you customize
+             Doors + handles
+             Baseboards                                                                                         Continue
+CAMZ Cleaning - FroCnt-eeinldinvgisufaal nblu/erperinatchable fixtures
+                                                                                    +$10
+                          Standard ceiling height
+STEP 3                                                                                         Developer notes
+
+Additional rooms                                                                                   Use cards for room-level extras.
+                                                                                                   Selected rooms can open their own mini-checklist.
+Customers add only the extra areas that exist in their home.                                       Basement should have size/finished-state logic if needed.
+
+                                       camzcleaning.com/book                                                                                                                                             18
+
+Any additional areas?                                          Your cleaning
+
+Only add rooms that need cleaning.                             Deep Cleaning
+                                                               2 bed • 2 bath • condo
+Basement                                    +$35  Home office
+                                                               Estimated total
+Laundry room                                +$12  Stairs              +$15
+
+                                                               $231
+
+                                                               Price updates as you customize
+
+                                                                                Continue
+
+                                                                      +$15
+
+Mudroom                                     +$10  Balcony      +$25
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 3
+
+Add-ons gallery
+
+Optional extras are visual cards, separate from the core room checklist.
+
+          camzcleaning.com/book                                                                          Developer notes
+
+Popular add-ons                                                        Your cleaning                         Show only common add-ons initially.
+                                                                                                             Specialty services can say “Quote.”
+Optional. Skip this step if your current package is enough.             Deep Cleaning                        Avoid a long ungrouped checkbox list.
+                                                                         2 bed • 2 bath • condo
+Inside oven                                 Inside fridge                                                                                                                                                          19
++$35                                        +$35                         Estimated total
+                                                                Interior windows
+
+                                                                   $266
+
+                                                                From $30
+                                                                         Price updates as you customize
+
+                                                                                        Continue
+
+Blinds                                      Wall spot cleaning  Carpet cleaning
+From $20                                    From $20            Quote
+
+CAMZ Cleaning - Front-end visual blueprint
+ADD-ON
+
+Inside oven
+
+A detail page explains scope before the customer adds a paid extra.
+
+camzcleaning.com/book                                                                                Developer notes
+
+Inside oven                                                          Your cleaning                       Keep add-on explanation under one screen.
+                                                                     Deep Cleaning                       Show the price in the CTA.
+Tell us enough to price it correctly - no long questionnaire.                                            Mention severe buildup review rules.
+                                                                     2 bed • 2 bath • condo
+What is included                            Add +$35                                                                                                                                                           20
+                                                                     Estimated total
+Add to booking
+ Interior cavity + racks                                            $266
+
+ Standard grease removal                                            Price updates as you customize
+
+                                                                                      Continue
+
+ Does not include dismantling door glass
+
+ Severe carbon buildup may require review
+
+CAMZ Cleaning - Front-end visual blueprint
+ADD-ON                                                                                         Developer notes
+
+Inside refrigerator                                                                                Customer should empty food first.
+                                                                                                   Freezer may be separate.
+Make preparation requirements clear before the task is added.                                      Prevent disputes by showing exclusions here and in final scope.
+
+                                       camzcleaning.com/book                                                                                                                                             21
+
+Inside refrigerator                                            Your cleaning
+                                                               Deep Cleaning
+Tell us enough to price it correctly - no long questionnaire.
+                                                               2 bed • 2 bath • condo
+What is included                            Add +$35
+Add to booking                                                 Estimated total
+ Shelves and drawers
+                                                               $266
+ Interior walls and bins
+                                                               Price updates as you customize
+ Customer removes food first
+                                                                                Continue
+ Freezer optional when defrosted
+
+CAMZ Cleaning - Front-end visual blueprint
+ADD-ON                                                                                         Developer notes
+
+Windows + blinds                                                                                   Default to standard-size interior windows.
+                                                                                                   Large/high windows trigger review.
+Quantity controls are appropriate when price scales by count.                                      Separate blind intensity from window count.
+
+                                       camzcleaning.com/book                                                                                                                                             22
+
+Interior windows + blinds                                      Your cleaning
+                                                               Deep Cleaning
+How many standard interior windows?
+                                                               2 bed • 2 bath • condo
+−               6                           +
+                                                               Estimated total
+
+                                                               $296
+
+                                                               Price updates as you customize
+
+                                                                                Continue
+
+Blind cleaning     Yes - light dust            Yes - detailed
+       No
+
+Large / floor-to-ceiling windows?
+
+   No              Yes - request review
+
+CAMZ Cleaning - Front-end visual blueprint
+ADD-ON                                                                                                           Developer notes
+
+Walls + baseboards                                                                                                   Spot clean vs full wall wash are different jobs.
+                                                                                                                     Detailed wall washing should usually require review.
+Offer meaningful levels instead of a vague yes/no.                                                                   Baseboards can be included according to tier.
+
+                                       camzcleaning.com/book                                                                                                                                                               23
+
+Walls + baseboards                                                               Your cleaning
+                                                                                 Deep Cleaning
+Choose the level you need
+                                                                                 2 bed • 2 bath • condo
+None                                        Included normal dusting on$l0y
+                                                                                 Estimated total
+
+                                                                                 $316
+
+                                                                                 Price updates as you customize
+
+                                                                                                  Continue
+
+Spot cleaning                               Visible marks in selected r+o$o2m0s
+
+Detailed walls                              Broad wall washing  Review
+
+CAMZ Cleaning - Front-end visual blueprint
+SPECIALTY
+
+Carpet + upholstery
+
+Keep specialty cleaning in the same booking journey without pretending the price model is identical.
+
+                      camzcleaning.com/book                          Your cleaning                     Developer notes
+                                                                     Deep Cleaning
+Carpet + upholstery                                                                                        Quote when equipment, size or stain condition matters.
+                                                                      2 bed • 2 bath • condo               Let customer add rooms/sofa size.
+Keep specialty services separate from regular cleaning price.                                              Combined quote should still preserve normal cleaning estimate.
+                                                                      Estimated total
+     Carpet rooms                                                                                                                                                                                                24
+                                                               Add Quote
+      Select quantity
+                                                                       Price updates as you customize
+     Stairs carpet
+                                                                                      Continue
+      Select quantity
+                                                               Add
+
+                   Sofa / sectional                            Add
+
+                         Choose size
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 4
+
+Recurring frequency
+
+Recurring savings should be easy to understand and never obscure the actual service price.
+
+        camzcleaning.com/book                                                                          Developer notes
+
+How often would you like cleaning?                                     Your cleaning                       Display discount percentage and resulting total.
+                                                                       Deep Cleaning                       “Most popular” is useful for biweekly.
+Recurring discounts appear clearly before checkout.                                                        Allow one-time service without pressure.
+                                                                       2 bed • 2 bath • condo
+One-time                                    No commitment                                                                                                                                                        25
+                                                                       Estimated total
+Weekly                                      Best upkeep    Save 12%
+                                                                       $291
+
+                                                                       Price updates as you customize
+
+                                                                                        Continue
+
+Every 2 weeks                               Most popular   Save 8%
+
+                   Every 4 weeks            Light maintenance Save 5%
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 4
+
+Date + arrival window
+
+Calendar and arrival-window selection should work cleanly on mobile.
+
+                      camzcleaning.com/book                           Your cleaning                                    Developer notes
+                                                                      Deep Cleaning
+Choose a date and arrival window                                                                                           Use real availability from scheduling backend.
+                                                                      2 bed • 2 bath • condo                               Do not promise exact arrival unless operationally supported.
+                                                                                                                           Unavailable dates should be visibly disabled.
+                                                                      Estimated total
+                                                                                                                                                                                                                                 26
+September 2026                                                        $291 Arrival window
+
+M   T           W                           T   F   S   S                Exact arrival may vary by traffic.  10-12 PM
+
+                                                                      Price upda8te-1s0asAyMou customize
+                                                                                       Continue
+
+1   2           3                           4   5   6   7
+
+                                                                      12-2 PM                                2-4 PM
+
+8   9           10                          11  12  13  14
+
+15  16          17                          18  19  20  21
+
+22  23          24                          25  26  27  28
+
+29  30
+CAMZ Cleaning - Front-end visual blueprint
+STEP 5                                                              Your cleaning                              Developer notes
+                                                                    Deep Cleaning
+Address + property access                                                                                          Address autocomplete is ideal.
+                                                                    2 bed • 2 bath • condo                         Access method can reveal conditional fields.
+Collect only the access information needed for successful arrival.                                                 Do not request door codes until necessary / securely handled.
+                                                                    Estimated total
+                                       camzcleaning.com/book                                                                                                                                                             27
+                                                                    $291Property access
+        Where are we cleaning?
+                                                                    Price updates as yIouwcilulsbtoemhizoe me
+              Street address                                                         Continue
+                 19621 40 ST SE                                                        Key / lockbox
+
+              Unit / apartment                                                         Concierge
+                 210
+
+CAMZ Cleaning - Front-end visual blueprint
+ STEP 5                                                                               Your cleaning                   Developer notes
+                                                                                      Deep Cleaning
+Parking                                                                                                                   Prioritize free street parking when available.
+                                                                                      2 bed • 2 bath • condo              Visitor pass responsibility should be explicit.
+ Parking is its own short step for condos and dense areas.                                                                Paid parking policy appears before payment.
+                                                                                      Estimated total
+                                         camzcleaning.com/book                                                                                                                                                                  28
+                                                                                      $291
+         Parking for the cleaning team
+                                                                                      Price updates as you customize
+               Simple options prevent arrival delays and unexpected parking charges.
+                                                                                                       Continue
+                   Free street parking
+
+                         Cleaner parks nearby when available
+
+                   Visitor parking
+
+                         Customer provides visitor pass
+
+                   Paid parking
+
+                         Parking cost added / reimbursed
+
+                   No parking nearby
+
+CAMZ Cleaning - Front-end visual blueprint
+                         Team will contact before arrival
+STEP 5
+
+Instructions + photo upload
+
+Photos are optional for normal jobs and useful for unusual conditions.
+
+                      camzcleaning.com/book                             Your cleaning                   Developer notes
+                                                                        Deep Cleaning
+Anything we should know?                                                                                    Allow 3-6 compressed photos.
+                                                                        2 bed • 2 bath • condo              Show upload progress and removal.
+Special instructions                                                                                        Photos can help trigger/resolve manual review.
+     e.g. Please focus on kitchen grease and main bathroom...           Estimated total
+                                                                                                                                                                                                                  29
+                                                                        $291
+
+                                                                        Price updates as you customize
+
+                                                                                         Continue
+
+Add photos (optional)
+
+s                                           s            s
+
+Add photo                                   Add photo  Add photo
+
+CAMZ Cleaning - Front-end visual blueprint
+STEP 6                                                                                                      Developer notes
+
+Transparent price review                                                                                        Line-item breakdown builds trust.
+                                                                                                                Discounts appear as negative lines.
+The customer sees how the estimate was built before payment.                                                    Taxes/payment timing should be added according to CAMZ
+                                                                                                                policy.
+                                       camzcleaning.com/book
+                                                                                                                                                                                                                      30
+Your price estimate                                                         Your cleaning
+                                                                            Deep Cleaning
+Transparent breakdown before you enter payment details.
+                                                                            2 bed • 2 bath • condo
+                      Deep cleaning - base                        $179.00
+                      Home office                                   $15.00  Estimated total
+                      Laundry room                                  $12.00
+                      Inside oven                                   $35.00  $237.80
+                      Wall spot cleaning                            $20.00
+                      Biweekly discount                            $-23.20  Price updates as you customize
+
+CAMZ Cleaning - FErosntti-menadtveidsutaol btaluleprint  $237.80                             Continue
+STEP 6                                                                                                           Developer notes
+
+Full scope review                                                                                                    Expandable sections reduce page length.
+                                                                                                                     Customer can edit any section.
+The final checklist is an explicit service agreement snapshot.                                                       Persist this exact scope with the booking record.
+
+                                       camzcleaning.com/book                                                                                                                                                               31
+
+Review exactly what we will clean                                                Your cleaning
+                                                                                 Deep Cleaning
+Expandable sections keep the page short while preserving full scope.
+                                                                                 2 bed • 2 bath • condo
+Kitchen                                                  8 included • 1 adds-on
+                                                                                 Estimated total
+Bathrooms                                                6 included  s
+                                                                                 $237.80
+
+                                                                                 Price updates as you customize
+
+                                                                                                  Continue
+
+Bedrooms                                                 5 included  s
+
+Living + dining                                          5 included  s
+
+CAMZ Cleaning -AFdrodnitt-eionndavlisaurael abslueprint  Office + laundry s
+CHECKOUT
+
+Guest vs sign-in
+
+Do not force account creation and lose conversions.
+
+                      camzcleaning.com/book                    Your cleaning                                                                    Developer notes
+                                                               Deep Cleaning
+How would you like to continue?                                                                                                                     Guest checkout should be first-class.
+                                                               2 bed • 2 bath • condo                                                               Offer sign-in for saved addresses/history.
+                                                                                                                                                    Keep selections saved across authentication.
+                                                               Estimated total
+                                                                                                                                                                                                                                                          32
+Continue as guest                                    Sign in   $237.80
+
+                                                               Price updates as you customize
+
+AlreadFyashtaevset. aNnoapcacsosuwnot?rdYroeuqrubiroeodk. ing is still saved if you go back. Use saved addresses and booking history. Continue
+Continue                                             Continue
+
+CAMZ Cleaning - Front-end visual blueprint
+CHECKOUT
+
+Contact details
+
+Collect communication details after the customer has invested in the booking.
+
+                      camzcleaning.com/book                      Your cleaning                   Developer notes
+                                                                 Deep Cleaning
+Contact details                                                                                      Validate email and Canadian phone format.
+                                                                 2 bed • 2 bath • condo              SMS consent should be explicit.
+First name                                   Last name                                               Pre-fill for signed-in customers.
+                                                                 Estimated total
+Taranveer                                    Singh                                                                                                                                                         33
+ Text me booking and arrival updates                            $237.80
+
+                                                                 Price updates as you customize
+
+                                                                                  Continue
+
+Email                                        Mobile
+    name@example.com                             (403) 555-0199
+
+CAMZ Cleaning - Front-end visual blueprint
+CHECKOUT                                                                                             Developer notes
+
+Payment                                                                                                  Use hosted/tokenized payment fields.
+                                                                                                         Terms link opens without losing form state.
+Payment screen is clean, secure-looking and scope-aware.                                                 Button contains the actual amount or deposit.
+
+                                       camzcleaning.com/book                                                                                                                                                   34
+
+Secure payment                                                       Your cleaning
+                                                                     Deep Cleaning
+Show deposit / authorization language clearly based on CAMZ policy.
+                                                                     2 bed • 2 bath • condo
+Card number
+                                                                     Estimated total
+ •••• I••a••g•r••e•e42t4o2the service scope and cancellation terms
+                                                                     $237.80
+
+                                                                     Price updates as you customize
+
+                                                                                      Continue
+
+Expiry   Confirm & book - $237.80
+
+                                       CVC
+
+09 / 29                                     •••
+
+CAMZ Cleaning - Front-end visual blueprint
+CONFIRMATION                                                                 Developer notes
+
+Booking confirmed                                                                Show booking ID prominently.
+                                                                                 Email/SMS confirmation fires after server confirmation.
+Confirmation page reduces support calls by repeating every critical detail.      Offer calendar and manage-booking actions.
+
+                                       camzcleaning.com/book                                                                                                                           35
+
+         Your cleaning is booked.
+
+
+  Manage boCookninfirgmation CAMZ-26091A2-d10d4t8o calendar
+
+                        Date                Saturday, September 12
+                                            10 AM - 12 PM
+                        Arrival             Deep Cleaning
+                                            19621 40 ST SE, Calgary
+                        Service
+
+                        Address
+CAMZ Cleaning - Front-end visual blueprint
+ACCOUNT                                                                                                    Developer notes
+
+Customer booking dashboard                                                                                     Upcoming and past tabs are enough for MVP.
+                                                                                                               Rebook can clone previous scope.
+A lightweight dashboard supports repeat business without making the booking flow dependent on an account.      Show status and arrival information.
+
+                                       camzcleaning.com/book                                                                                                                                                         36
+
+My bookings
+
+Upcoming                                    Past
+
+    Deep Cleaning                                       Confirmed
+
+SaveSdaat,dSdereps1s2 • 10 AM-12 PM
+     19621 40 ST SE, Calgary
+      19621 40 ST SE, Calgary
+
+                                                  View  Edit
+
+CAMZ Cleaning - Front-end visual blueprint
+ACCOUNT                                                                                                    Developer notes
+
+Edit an upcoming booking                                                                                               Every edit should recalculate price if needed.
+                                                                                                                       Show difference before final save.
+Changes remain transparent and reversible before cutoff rules apply.                                                   Respect cancellation/reschedule cutoff rules.
+
+                                       camzcleaning.com/book          Edit
+
+Edit booking                                                          Edit
+
+Changes that affect price show the difference before saving.          Edit
+
+Date & arrival                              Sep 12 • 10 AM-12 PM      Edit
+                                                                                                                                                                                                                                  37
+Cleaning scope                              Deep + 3 add-ons
+                                            19621 40 ST SE            Edit
+     Save changes
+
+Address
+
+                    Parking                 Visitor pass
+                                            Kitchen priority
+CAMZ Cleaning - Front-end visual blueprint
+                    Instructions
+RESPONSIVE                                                                          Developer notes
+
+Mobile booking experience                                                               Use bottom sticky summary/CTA.
+                                                                                        Avoid tiny multi-column checklists.
+Mobile keeps the price sticky at the bottom while content scrolls naturally.            Tap targets should be at least ~44 px.
+
+                                       camzcleaning.com/book                                                                                                                                  38
+
+CAMZ                                                   CAMZ
+
+Choose service                                         Kitchen
+
+SEsttaimnadteadrtdotal                           Next   Updated total         Next
+
+$$112979                                                Counters
+
+                                                       $214
+
+                                                        Sink + faucet
+
+Deep                                                    Stovetop
+$179
+
+                                    Customize           Cabinet fronts
+CAMZ Cleaning - Front-end visVuaarliebslueprint
+EDGE STATE                                                                                          Developer notes
+
+Manual review / quote request                                                                           Save all selections.
+                                                                                                        Explain why review is needed without alarming the user.
+When instant pricing becomes unreliable, the experience changes gracefully instead of failing.          Do not collect payment until price is confirmed if policy requires.
+
+                                       camzcleaning.com/book                                                                                                                                                  39
+
+        Manual review - protect the customer and the business
+
+      This job needs a quick review before we can confirm the price.
+
+       Large property + heavy condition + wall washing selected.
+Do not show an arbitrary inflated price. Switch gracefully from instant estimate to quote request.
+
+        Your selections are saved. CAMZ can send a confirmed quote without making you restart.
+
+Request confirmed quote                     Edit selections
+
+CAMZ Cleaning - Front-end visual blueprint
+UI SYSTEM                                                                                     Developer notes
+
+Reusable component states                                                                         Create shared components for selection cards, checkboxes,
+                                                                                                  steppers and price states.
+Consistency matters more than decorative complexity.                                              Use one error style everywhere.
+                                                                                                  Disabled state must remain legible.
+                                       camzcleaning.com/book
+                                                                                                                                                                                                        40
+Front-end component states
+
+Developer should implement these consistently across every step.
+
+Buttons                                                                     Price states
+
+        Continue                                    Back          Continue  Instant estimate
+
+Selection cards                                        Default              Updated +$35
+     Selected
+                                                                            Manual review
+
+CAMZ CleanVinagli-dFartoiontn-end visual blueprint
+ARCHITECTURE                                                                                                             Developer notes
+
+What the front end must persist                                                                                              Use one central booking-state object.
+                                                                                                                             Every change recalculates through a pricing endpoint/rules
+The design is simple because the booking state and pricing rules are structured underneath.                                  service.
+                                                                                                                             Snapshot final scope and price version.
+                                       camzcleaning.com/book
+                                                                                                                                                                                                                                   41
+        Developer handoff - screen architecture
+
+                 Persistent shell           Booking state       Rules engine                 Confirmation
+
+                    • CAMZ header           • Service tier      • Base pricing               • Immutable scope snapshot
+                    • Progress indicator    • Property inputs   • Task modifiers             • Price breakdown
+                    • Back / continue       • Task selections   • Condition multipliers      • Booking ID
+                    • Sticky price summary  • Add-ons           • Discounts                  • Email/SMS payload
+                                            • Schedule          • Review triggers
+CAMZ Cleaning - Front-end visual blueprint  • Contact + access
+ LAUNCH                                                                                                                                   Developer notes
+
+Recommended implementation order                                                                                                              Phase 1 should be fully usable on mobile.
+                                                                                                                                              Analytics events should ship with MVP.
+ Build the conversion-critical path first, then add account and automation features.                                                          Do not delay launch for advanced AI features.
+
+                                         camzcleaning.com/book                                                                                                                                                                                      42
+
+         Recommended launch sequence
+
+                               Phase 1
+                       1
+
+                                         Standard / Deep / Custom, property, room checklist, add-ons, date, address, review and payment.
+
+                               Phase 2
+                       2
+
+                                         Recurring profiles, saved homes, reschedule, promo codes and cleaner assignment visibility.
+
+                               Phase 3
+                       3
+
+                                         Photo-assisted quote review, smarter time estimates and customer rebooking recommendations.
+
+CAMZ Cleaning - Front-end visual blueprint
+CAMZ CLEANING
+
+The front end should feel like
+a guided booking assistant - not a spreadsheet.
+
+Three simple service choices. Room-by-room control. Live pricing. Full scope transparency.
+
+Simple to choose                                  Easy to customize           Clear before payment     Safe for unusual jobs
+
+Standard / Deep / Custom                          Only relevant options open  Exact scope + breakdown  Manual review when needed
+
+CAMZ Cleaning - Front-end visual blueprint • End                                                                                  43
+

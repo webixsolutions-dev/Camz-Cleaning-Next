@@ -1,3 +1,4 @@
+import { buildInvoicePdfBytes, invoicePdfFilename } from "@/lib/crm/invoicePdfBytes";
 import { loadOfficialLogoDataUri } from "@/lib/crm/logo";
 import { buildInvoiceHtml, pickBillingAddress, type CompanyLike, type InvoiceLike } from "@/lib/crm/pdf";
 import { writeCrmAudit } from "@/lib/crm/services/audit";
@@ -33,12 +34,13 @@ function fromRevisionSnapshot(snapshot: any, live: any): InvoiceLike {
 export async function renderImmutableInvoicePdf(options: {
   supabase: PdfClient;
   invoiceId: string;
-  actorId: string;
+  actorId?: string;
+  logAsset?: boolean;
 }) {
   const [{ data: live, error }, { data: settings }, logoSrc] = await Promise.all([
     options.supabase
       .from("crm_invoices")
-      .select("*, crm_customers(display_name, email, phone, crm_customer_addresses(*)), crm_invoice_items(*), crm_payments(*)")
+      .select("*, crm_customers(display_name, customer_code, email, phone, crm_customer_addresses(*)), crm_invoice_items(*), crm_payments(*)")
       .eq("id", options.invoiceId)
       .maybeSingle(),
     options.supabase.from("crm_company_settings").select("*").eq("id", 1).maybeSingle(),
@@ -69,29 +71,46 @@ export async function renderImmutableInvoicePdf(options: {
     }
   }
 
+  const company = (settings || {}) as CompanyLike;
+  const resolvedLogo = settings?.logo_url || logoSrc;
   const html = buildInvoiceHtml(source, {
-    company: (settings || {}) as CompanyLike,
-    logoSrc: settings?.logo_url || logoSrc,
-    preview: true,
+    company,
+    logoSrc: resolvedLogo,
+    preview: false,
   });
-  const storagePath = `snapshot/${options.invoiceId}/rev-${live.current_revision || 0}-${Date.now()}.html`;
-
-  const { error: assetError } = await options.supabase.from("crm_invoice_assets").insert({
-    kind: "pdf",
-    invoice_id: options.invoiceId,
-    storage_path: storagePath,
-    public_url: snapshotUsed ? "revision-snapshot" : "live-draft",
-    created_by: options.actorId,
+  const pdfBytes = await buildInvoicePdfBytes({
+    invoice: source,
+    company,
+    logoSrc: resolvedLogo,
   });
-  if (assetError) console.error("CRM pdf asset insert failed:", assetError);
+  const filename = invoicePdfFilename(live.invoice_number);
 
-  await writeCrmAudit(options.supabase, {
-    entity_type: "crm_invoice_assets",
-    entity_id: options.invoiceId,
-    action: "pdf_snapshot",
-    after: { storage_path: storagePath, immutable: snapshotUsed },
-    actor_id: options.actorId,
-  });
+  if (options.logAsset !== false && options.actorId) {
+    const storagePath = `snapshot/${options.invoiceId}/rev-${live.current_revision || 0}-${Date.now()}.pdf`;
+    const { error: assetError } = await options.supabase.from("crm_invoice_assets").insert({
+      kind: "pdf",
+      invoice_id: options.invoiceId,
+      storage_path: storagePath,
+      public_url: snapshotUsed ? "revision-snapshot" : "live-draft",
+      created_by: options.actorId,
+    });
+    if (assetError) console.error("CRM pdf asset insert failed:", assetError);
 
-  return { ok: true as const, html, invoice_number: live.invoice_number, snapshotUsed };
+    await writeCrmAudit(options.supabase, {
+      entity_type: "crm_invoice_assets",
+      entity_id: options.invoiceId,
+      action: "pdf_snapshot",
+      after: { storage_path: storagePath, immutable: snapshotUsed, filename },
+      actor_id: options.actorId,
+    });
+  }
+
+  return {
+    ok: true as const,
+    html,
+    pdfBytes,
+    filename,
+    invoice_number: live.invoice_number,
+    snapshotUsed,
+  };
 }

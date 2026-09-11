@@ -36,7 +36,7 @@ const cards = [
 
 export default function InvoiceCrmPage() {
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <h1 className="text-slate-900">Invoice CRM</h1>
       <p className="mt-1 mb-6 max-w-2xl text-slate-500">
         Separate from bookings, jobs, and the existing payments table. Cleaners cannot access this module. Data entry can create and issue invoices; only admins can void.

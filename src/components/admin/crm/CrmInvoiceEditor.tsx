@@ -52,6 +52,7 @@ type Invoice = {
     amount_cents: number;
     method: string | null;
     is_void: boolean;
+    is_deposit?: boolean;
     received_at: string;
   }>;
   crm_invoice_events?: Array<{
@@ -75,7 +76,7 @@ type Notice = {
 };
 
 const fieldClass =
-  "h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-[13px] font-medium text-slate-700 outline-none transition focus:border-[#4A86F7] focus:ring-4 focus:ring-[#4A86F7]/10";
+  "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-[16px] font-medium text-slate-700 outline-none transition focus:border-[#4A86F7] focus:ring-4 focus:ring-[#4A86F7]/10 sm:text-[13px]";
 
 const statusTone: Record<string, string> = {
   draft: "bg-slate-100 text-slate-600",
@@ -115,6 +116,7 @@ export default function CrmInvoiceEditor({
   const [saving, setSaving] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("e_transfer");
+  const [isDeposit, setIsDeposit] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [confirmVoid, setConfirmVoid] = useState(false);
   const [sendEmail, setSendEmail] = useState("");
@@ -377,6 +379,7 @@ export default function CrmInvoiceEditor({
           amount_cents: cents,
           amount_dollars: paymentAmount,
           method: paymentMethod,
+          is_deposit: isDeposit,
         }),
       });
       const body = await readApi(response);
@@ -385,6 +388,7 @@ export default function CrmInvoiceEditor({
         return;
       }
       setPaymentAmount("");
+      setIsDeposit(false);
       showNotice({
         kind: "success",
         title: "Payment recorded",
@@ -446,7 +450,7 @@ export default function CrmInvoiceEditor({
   const total = draft ? draftTotals.total_cents : invoice?.total_cents;
 
   return (
-    <div className="relative min-h-full bg-[#F4F7FB] p-6">
+    <div className="relative min-h-full overflow-x-hidden bg-[#F4F7FB] p-4 sm:p-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#4A86F7]">Invoice CRM</p>
@@ -469,18 +473,18 @@ export default function CrmInvoiceEditor({
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-[0_18px_50px_rgba(19,38,58,0.06)]">
-          <div className="flex items-center justify-between border-b border-slate-100 bg-[linear-gradient(135deg,#13263A_0%,#1E3A5F_55%,#4A86F7_140%)] px-6 py-5 text-white">
-            <div>
+          <div className="flex flex-col gap-3 border-b border-slate-100 bg-[linear-gradient(135deg,#13263A_0%,#1E3A5F_55%,#4A86F7_140%)] px-4 py-4 text-white sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
+            <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/70">Camz Cleaning</p>
-              <p className="mt-1 text-lg font-semibold">{invoice?.invoice_number || "Draft invoice"}</p>
+              <p className="mt-1 break-words text-lg font-semibold">{invoice?.invoice_number || "Draft invoice"}</p>
             </div>
-            <div className="text-right text-[12px] text-white/80">
-              <p>{selectedCustomer?.display_name || "No customer yet"}</p>
+            <div className="min-w-0 text-[12px] text-white/80 sm:text-right">
+              <p className="break-words">{selectedCustomer?.display_name || "No customer yet"}</p>
               <p>{dueDate ? `Due ${dueDate}` : "No due date"}</p>
             </div>
           </div>
 
-          <div className="space-y-5 p-6">
+          <div className="space-y-5 p-4 sm:p-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Customer
@@ -488,6 +492,7 @@ export default function CrmInvoiceEditor({
                   <option value="">Select customer</option>
                   {customers.map((customer) => (
                     <option key={customer.id} value={customer.id}>
+                      {customer.customer_code ? `#${customer.customer_code} · ` : ""}
                       {customer.display_name}
                     </option>
                   ))}
@@ -646,6 +651,10 @@ export default function CrmInvoiceEditor({
                 <option value="cash">Cash</option>
                 <option value="cheque">Cheque</option>
               </select>
+              <label className="flex items-center gap-2 text-[13px] text-slate-600">
+                <input type="checkbox" checked={isDeposit} onChange={(event) => setIsDeposit(event.target.checked)} />
+                This is a deposit / advance
+              </label>
               <button type="submit" disabled={saving} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[13px] font-bold text-white">
                 <Send size={15} />
                 Save payment
@@ -660,10 +669,13 @@ export default function CrmInvoiceEditor({
                 Reverse is admin-only. It does not delete the payment. It voids it, restores the invoice balance, and you then record the correct payment.
               </p>
               {invoice.crm_payments.map((payment) => (
-                <div key={payment.id} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-                  <span>
+                <div key={payment.id} className="mb-2 flex flex-col gap-2 rounded-xl bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="break-words">
                     {formatCad(payment.amount_cents)}{" "}
-                    <span className="text-slate-500">{payment.is_void ? "(reversed)" : payment.method}</span>
+                    <span className="text-slate-500">
+                      {payment.is_void ? "(reversed)" : payment.method}
+                      {payment.is_deposit ? " · deposit" : ""}
+                    </span>
                   </span>
                   {isAdmin && !payment.is_void ? (
                     <button

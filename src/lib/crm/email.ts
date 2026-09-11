@@ -8,6 +8,11 @@ export async function sendCrmInvoiceEmail(options: {
   subject: string;
   html: string;
   replyTo?: string | null;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer | Uint8Array;
+    contentType?: string;
+  }>;
 }) {
   if (!isDeliverableEmail(options.to)) {
     return {
@@ -33,6 +38,11 @@ export async function sendCrmInvoiceEmail(options: {
       replyTo: options.replyTo || undefined,
       subject: options.subject,
       html: options.html,
+      attachments: options.attachments?.map((file) => ({
+        filename: file.filename,
+        content: Buffer.from(file.content),
+        contentType: file.contentType || "application/pdf",
+      })),
     });
 
     return { ok: true as const, id: info.messageId };
