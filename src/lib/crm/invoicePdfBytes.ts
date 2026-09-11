@@ -7,7 +7,6 @@ const PAGE_H = 792;
 const MARGIN = 48;
 const NAVY = rgb(0.075, 0.149, 0.227);
 const MUTED = rgb(0.29, 0.333, 0.408);
-const LINE = rgb(0.84, 0.87, 0.89);
 const RULE = rgb(0.54, 0.6, 0.67);
 const VOID_RED = rgb(0.88, 0.11, 0.28);
 
@@ -182,10 +181,7 @@ export async function buildInvoicePdfBytes(options: {
   page.drawRectangle({ x: MARGIN, y: y - 8, width: PAGE_W - MARGIN * 2, height: 8, color: RULE });
   y -= 36;
   text(page, `Invoice #${number}`, MARGIN, y, 26, bold);
-  y -= 28;
-
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: LINE });
-  y -= 18;
+  y -= 22;
 
   const colW = (PAGE_W - MARGIN * 2) / 3;
   const summaryTop = y;
@@ -212,9 +208,7 @@ export async function buildInvoicePdfBytes(options: {
   detailLines.forEach((line, index) => text(page, line, MARGIN + colW, summaryTop - 16 - index * 13, 10, regular, MUTED));
   paymentLines.forEach((line, index) => text(page, line, MARGIN + colW * 2, summaryTop - 16 - index * 13, 10, regular, MUTED));
 
-  y = summaryTop - blockH - 10;
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: LINE });
-  y -= 22;
+  y = summaryTop - blockH - 18;
 
   const qtyX = 360;
   const priceX = 430;
@@ -224,9 +218,7 @@ export async function buildInvoicePdfBytes(options: {
   text(page, "Price", priceX, y, 11, bold);
   const amountHeader = "Amount";
   text(page, amountHeader, amountX - bold.widthOfTextAtSize(amountHeader, 11), y, 11, bold);
-  y -= 8;
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: LINE });
-  y -= 16;
+  y -= 20;
 
   const drawRight = (value: string, x: number, top: number, size = 10, font: PDFFont = regular) => {
     text(page, value, x - font.widthOfTextAtSize(value, size), top, size, font);
@@ -245,8 +237,7 @@ export async function buildInvoicePdfBytes(options: {
     drawRight(String(item.quantity), qtyX + 24, y);
     drawRight(money(item.unit_cents), priceX + 40, y);
     drawRight(money(line), amountX, y);
-    y -= Math.max(18, descLines.length * 13 + 6);
-    page.drawLine({ start: { x: MARGIN, y: y + 8 }, end: { x: PAGE_W - MARGIN, y: y + 8 }, thickness: 0.5, color: LINE });
+    y -= Math.max(20, descLines.length * 13 + 8);
   }
 
   const totals: Array<{ label: string; value: string; strong?: boolean }> = [
