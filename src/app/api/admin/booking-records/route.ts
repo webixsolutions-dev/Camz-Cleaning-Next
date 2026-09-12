@@ -88,7 +88,7 @@ function validateManpowerTime(payload: ReturnType<typeof cleanBookingPayload>) {
   return null;
 }
 
-// ✅ Improved syncAssignments with error handling
+// ✅ Error-handled assignment sync
 async function syncAssignments(
   supabase: Awaited<ReturnType<typeof createClient>>,
   bookingId: string,
@@ -149,7 +149,7 @@ async function notifyCleaners(
             service_time: bookingData.service_time,
             full_address: bookingData.full_address,
             cleaning_type: bookingData.cleaning_type,
-            area: bookingData.area,
+            // area hata diya — BookingDetails type mein nahi hai
           }
         );
         console.log(`✅ [EMAIL SUCCESS] Assignment email sent to: ${cleaner.name} (${cleaner.email})`);
@@ -162,7 +162,7 @@ async function notifyCleaners(
   }
 }
 
-// ✅ Background email helper — response ke baad chalega, request block nahi karega
+// ✅ Background email helper — response ke baad chalta hai
 function sendAssignmentEmailsInBackground(
   supabase: Awaited<ReturnType<typeof createClient>>,
   cleanerIds: string[],
@@ -228,10 +228,10 @@ export async function POST(request: NextRequest) {
     await syncAssignments(supabase, data.id, body.assigned_cleaner_ids || [], user.id);
   } catch (err) {
     console.error("❌ Assignment failed on POST:", err);
-    // booking create ho gayi hai, assignment fail — warn karo lekin error na do
+    // Booking create ho gayi — assignment fail pe sirf warn, error na do
   }
 
-  // ✅ Email background mein bhejo — response block nahi hoga
+  // ✅ Background email
   if (body.assigned_cleaner_ids && body.assigned_cleaner_ids.length > 0) {
     sendAssignmentEmailsInBackground(supabase, body.assigned_cleaner_ids, data);
   }
@@ -303,7 +303,6 @@ export async function PATCH(request: NextRequest) {
 
     const { data: bookingData } = await supabase.from("booking_records").select("*").eq("id", body.id).single();
 
-    // ✅ Background email
     if (bookingData && body.assigned_cleaner_ids.length > 0) {
       sendAssignmentEmailsInBackground(supabase, body.assigned_cleaner_ids, bookingData);
     }
@@ -357,7 +356,6 @@ export async function PATCH(request: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  // Assignment sync (agar cleaner IDs bheji gayi hain)
   if (Array.isArray(body.assigned_cleaner_ids)) {
     if (role !== "admin" && role !== "data_entry") {
       return NextResponse.json({ error: "Only admin and data entry can assign cleaners." }, { status: 403 });
@@ -372,7 +370,6 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // ✅ Background email — response block nahi hoga
     if (body.assigned_cleaner_ids.length > 0 && updatedBooking) {
       sendAssignmentEmailsInBackground(supabase, body.assigned_cleaner_ids, updatedBooking);
     }
