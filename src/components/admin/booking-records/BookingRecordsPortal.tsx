@@ -92,6 +92,12 @@ export type BookingRecord = {
   updated_at: string;
   assigned_cleaners: CleanerUser[];
   service_images: BookingImage[];
+  // ✅ NEW: edit tracking fields
+  last_edited_by?: string | null;
+  last_edited_by_name?: string | null;
+  last_edited_by_role?: string | null;
+  last_edited_at?: string | null;
+  edited_by_data_entry?: boolean | null;
 };
 
 type CurrentUser = { id: string; name: string; role: string } | null;
@@ -121,7 +127,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
   const isCleaner = role === "cleaner";
   const isDataEntry = role === "data_entry";
   const canCreate = role === "admin" || isDataEntry;
-  const canEdit = role === "admin";
+  const canEdit = role === "admin" || isDataEntry;  // ✅ data_entry bhi edit kar sakta hai
   const canAssign = role === "admin";
   const canDelete = role === "admin";
   const canManageUsers = role === "admin";
@@ -146,6 +152,17 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [manageUsersOpen, setManageUsersOpen] = useState(false);
+
+  // ✅ Jab records update ho, details bhi fresh karo
+  useEffect(() => {
+    if (details) {
+      const fresh = records.find((r) => r.id === details.id);
+      if (fresh && fresh !== details) {
+        setDetails(fresh);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [records]);
 
   const filtered = useMemo(() => scopedBookings.filter((booking) => {
     const today = toDateInput(new Date());
@@ -216,6 +233,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
         return;
       }
 
+      // ✅ Update state immediately
       if (!form.id && result.booking) {
         const assigned_cleaners = cleaners.filter((cleaner) =>
           form.assigned_cleaner_ids.includes(cleaner.id),
@@ -236,17 +254,43 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
         const assigned_cleaners = cleaners.filter((cleaner) =>
           form.assigned_cleaner_ids.includes(cleaner.id),
         );
-        setRecords((current) =>
-          current.map((booking) =>
-            booking.id === form.id
-              ? ({ ...booking, ...form, assigned_cleaners } as BookingRecord)
-              : booking,
-          ),
-        );
+        // ✅ Server se fresh record fetch karo taake tracking fields bhi aayein
+        try {
+          const freshResponse = await fetch(`/api/admin/booking-records?id=${form.id}`);
+          if (freshResponse.ok) {
+            const freshData = await freshResponse.json();
+            if (freshData.booking) {
+              setRecords((current) =>
+                current.map((booking) =>
+                  booking.id === form.id
+                    ? ({ ...freshData.booking, assigned_cleaners, service_images: booking.service_images } as BookingRecord)
+                    : booking,
+                ),
+              );
+            }
+          } else {
+            setRecords((current) =>
+              current.map((booking) =>
+                booking.id === form.id
+                  ? ({ ...booking, ...form, assigned_cleaners } as BookingRecord)
+                  : booking,
+              ),
+            );
+          }
+        } catch {
+          setRecords((current) =>
+            current.map((booking) =>
+              booking.id === form.id
+                ? ({ ...booking, ...form, assigned_cleaners } as BookingRecord)
+                : booking,
+            ),
+          );
+        }
       }
 
       setFormOpen(false);
-      router.refresh();
+      // ✅ Full page reload taake server se fresh data aaye
+      window.location.href = window.location.pathname + "?t=" + Date.now();
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -261,7 +305,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
     if (!window.confirm(`Delete booking for ${booking.full_name}?`)) return;
     const response = await fetch(`/api/admin/booking-records?id=${booking.id}`, { method: "DELETE" });
     const result = await response.json();
-    if (!response.ok) window.alert(result.error || "Unable to delete booking."); else router.refresh();
+    if (!response.ok) window.alert(result.error || "Unable to delete booking."); else window.location.reload();
   };
 
   if (formOpen && canCreate) {
@@ -587,6 +631,12 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
                     <h3 className="truncate text-[12px] font-bold text-[#13263A]">
                       {booking.full_name}
                     </h3>
+                    {/* ✅ Badge — user ka naam */}
+                    {booking.edited_by_data_entry && (
+                      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[7px] font-bold text-amber-800">
+                        ✏️ Edited by {booking.last_edited_by_name || "Data Entry"}
+                      </span>
+                    )}
                     <p className="mt-1 truncate text-[10px] text-slate-500">
                       {booking.cleaning_type}
                     </p>
@@ -682,7 +732,9 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
                   ].map((head) => (
                     <th
                       key={head}
-                      className="border-b border-slate-200 px-3 py-2.5 text-[8px] font-extrabold uppercase tracking-[0.08em] text-slate-400"
+                      className={`border-b border-slate-200 px-3 py-2.5 text-[8px] font-extrabold uppercase tracking-[0.08em] text-slate-400 ${
+                        head === "Customer" ? "w-[220px]" : ""
+                      }`}
                     >
                       {head}
                     </th>
@@ -697,12 +749,19 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
                     className="transition hover:bg-blue-50/40"
                   >
                     <td className="px-3 py-3">
+                      {/* ✅ Name poora dikhe */}
                       <span
-                        className="block truncate text-[10px] font-bold text-[#13263A]"
+                        className="block break-words text-[10px] font-bold text-[#13263A]"
                         title={booking.full_name}
                       >
                         {booking.full_name}
                       </span>
+                      {/* ✅ Badge — user ka naam */}
+                      {booking.edited_by_data_entry && (
+                        <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[7px] font-bold text-amber-800">
+                          ✏️ Edited by {booking.last_edited_by_name || "Data Entry"}
+                        </span>
+                      )}
                     </td>
 
                     <td className="px-3 py-3">
@@ -816,7 +875,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
           onClose={() => setAssigning(null)}
           onSaved={() => {
             setAssigning(null);
-            router.refresh();
+            window.location.reload();
           }}
         />
       )}
@@ -833,7 +892,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
           }}
           onDeleted={() => {
             setDetails(null);
-            router.refresh();
+            window.location.reload();
           }}
         />
       )}
@@ -1641,7 +1700,7 @@ function DetailsModal({ booking, canDelete, canEdit, onClose, onEdit, onDeleted 
       window.alert(result.error || "Unable to update booking status.");
       return;
     }
-    router.refresh();
+    window.location.reload();
   };
 
   return (
@@ -1653,7 +1712,20 @@ function DetailsModal({ booking, canDelete, canEdit, onClose, onEdit, onDeleted 
               <p className="text-[8px] font-extrabold uppercase tracking-[0.12em] text-[#4A86F7]">Booking Summary</p>
               <h3 className="mt-1 text-[13px] font-bold text-[#13263A]">Service & customer information</h3>
             </div>
-            <StatusPill status={booking.status} />
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusPill status={booking.status} />
+              {/* ✅ Badge — user ka naam */}
+              {booking.edited_by_data_entry && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[7px] font-bold text-amber-800">
+                  ✏️ Edited by {booking.last_edited_by_name || "Data Entry"}
+                  {booking.last_edited_at && (
+                    <span className="ml-1 font-normal opacity-80">
+                      ({new Date(booking.last_edited_at).toLocaleDateString("en-CA")})
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
