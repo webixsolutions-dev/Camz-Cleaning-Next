@@ -1,7 +1,8 @@
 import { enforceMutationSecurity } from "@/lib/security/http";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendAssignmentEmail } from "@/lib/email"; 
+import { revalidatePath } from "next/cache";
 
 type BookingPayload = Record<string, unknown> & {
   id?: string;
@@ -87,13 +88,46 @@ function validateManpowerTime(payload: ReturnType<typeof cleanBookingPayload>) {
   return null;
 }
 
-async function syncAssignments(supabase: Awaited<ReturnType<typeof createClient>>, bookingId: string, cleanerIds: string[], assignedBy: string) {
-  await supabase.from("booking_record_assignments").delete().eq("booking_id", bookingId);
+// ✅ Improved syncAssignments with error handling
+async function syncAssignments(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bookingId: string,
+  cleanerIds: string[],
+  assignedBy: string
+) {
+  const { error: deleteError } = await supabase
+    .from("booking_record_assignments")
+    .delete()
+    .eq("booking_id", bookingId);
+
+  if (deleteError) {
+    console.error("❌ [ASSIGNMENT DELETE FAILED]", deleteError);
+    throw new Error(`Failed to clear assignments: ${deleteError.message}`);
+  }
+
   if (!cleanerIds.length) return;
-  await supabase.from("booking_record_assignments").insert(cleanerIds.map((cleaner_id) => ({ booking_id: bookingId, cleaner_id, assigned_by: assignedBy })));
+
+  const { error: insertError } = await supabase
+    .from("booking_record_assignments")
+    .insert(cleanerIds.map((cleaner_id) => ({
+      booking_id: bookingId,
+      cleaner_id,
+      assigned_by: assignedBy,
+    })));
+
+  if (insertError) {
+    console.error("❌ [ASSIGNMENT INSERT FAILED]", insertError);
+    throw new Error(`Failed to save assignments: ${insertError.message}`);
+  }
+
+  console.log(`✅ [ASSIGNMENT] ${cleanerIds.length} cleaner(s) saved for booking ${bookingId}`);
 }
 
-async function notifyCleaners(supabase: Awaited<ReturnType<typeof createClient>>, cleanerIds: string[], bookingData: any) {
+async function notifyCleaners(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  cleanerIds: string[],
+  bookingData: any
+) {
   if (!cleanerIds || cleanerIds.length === 0) return;
 
   const { data: cleaners } = await supabase
@@ -105,19 +139,43 @@ async function notifyCleaners(supabase: Awaited<ReturnType<typeof createClient>>
 
   for (const cleaner of cleaners) {
     if (cleaner.email) {
-      await sendAssignmentEmail(
-        cleaner.email,
-        cleaner.name || "Cleaner",
-        {
-          full_name: bookingData.full_name,
-          service_date: bookingData.service_date,
-          service_time: bookingData.service_time,
-          full_address: bookingData.full_address,
-          cleaning_type: bookingData.cleaning_type
-        }
-      );
+      try {
+        await sendAssignmentEmail(
+          cleaner.email,
+          cleaner.name || "Cleaner",
+          {
+            full_name: bookingData.full_name,
+            service_date: bookingData.service_date,
+            service_time: bookingData.service_time,
+            full_address: bookingData.full_address,
+            cleaning_type: bookingData.cleaning_type,
+            area: bookingData.area,
+          }
+        );
+        console.log(`✅ [EMAIL SUCCESS] Assignment email sent to: ${cleaner.name} (${cleaner.email})`);
+      } catch (error) {
+        console.error(`❌ [EMAIL FAILED] Could not send email to ${cleaner.email}. Error:`, error);
+      }
+    } else {
+      console.log(`⚠️ [EMAIL SKIPPED] No email address found for user: ${cleaner.name}`);
     }
   }
+}
+
+// ✅ Background email helper — response ke baad chalega, request block nahi karega
+function sendAssignmentEmailsInBackground(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  cleanerIds: string[],
+  bookingData: any
+) {
+  if (!cleanerIds || cleanerIds.length === 0) return;
+  after(async () => {
+    try {
+      await notifyCleaners(supabase, cleanerIds, bookingData);
+    } catch (err) {
+      console.error("❌ [BACKGROUND EMAIL ERROR]", err);
+    }
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -159,14 +217,27 @@ export async function POST(request: NextRequest) {
   const manpowerError = validateManpowerTime(payload);
   if (manpowerError) return NextResponse.json({ error: manpowerError }, { status: 400 });
 
-  const { data, error } = await supabase.from("booking_records").insert({ ...payload, added_by_user: user.id, added_by: profile?.name || user.email || "Portal User" }).select("*").single();
+  const { data, error } = await supabase
+    .from("booking_records")
+    .insert({ ...payload, added_by_user: user.id, added_by: profile?.name || user.email || "Portal User" })
+    .select("*")
+    .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  
-  await syncAssignments(supabase, data.id, body.assigned_cleaner_ids || [], user.id);
-  
-  if (body.assigned_cleaner_ids && body.assigned_cleaner_ids.length > 0) {
-    await notifyCleaners(supabase, body.assigned_cleaner_ids, data);
+
+  try {
+    await syncAssignments(supabase, data.id, body.assigned_cleaner_ids || [], user.id);
+  } catch (err) {
+    console.error("❌ Assignment failed on POST:", err);
+    // booking create ho gayi hai, assignment fail — warn karo lekin error na do
   }
+
+  // ✅ Email background mein bhejo — response block nahi hoga
+  if (body.assigned_cleaner_ids && body.assigned_cleaner_ids.length > 0) {
+    sendAssignmentEmailsInBackground(supabase, body.assigned_cleaner_ids, data);
+  }
+
+  revalidatePath("/admin-dashboard/booking-records");
+  revalidatePath("/admin/booking-records");
 
   return NextResponse.json({ booking: data });
 }
@@ -215,29 +286,51 @@ export async function PATCH(request: NextRequest) {
 
   if (!body.id) return NextResponse.json({ error: "Booking id is required." }, { status: 400 });
 
+  // === Assignment-only update ===
   if (Array.isArray(body.assigned_cleaner_ids) && Object.keys(body).length <= 2) {
-    if (role !== "admin") return NextResponse.json({ error: "Only admin can assign cleaners." }, { status: 403 });
-    await syncAssignments(supabase, body.id, body.assigned_cleaner_ids, user.id);
-    
-    const { data: bookingData } = await supabase.from("booking_records").select("*").eq("id", body.id).single();
-    if (bookingData && body.assigned_cleaner_ids.length > 0) {
-      await notifyCleaners(supabase, body.assigned_cleaner_ids, bookingData);
+    if (role !== "admin" && role !== "data_entry") {
+      return NextResponse.json({ error: "Only admin and data entry can assign cleaners." }, { status: 403 });
     }
+
+    try {
+      await syncAssignments(supabase, body.id, body.assigned_cleaner_ids, user.id);
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Failed to save assignments" },
+        { status: 500 }
+      );
+    }
+
+    const { data: bookingData } = await supabase.from("booking_records").select("*").eq("id", body.id).single();
+
+    // ✅ Background email
+    if (bookingData && body.assigned_cleaner_ids.length > 0) {
+      sendAssignmentEmailsInBackground(supabase, body.assigned_cleaner_ids, bookingData);
+    }
+
+    revalidatePath("/admin-dashboard/booking-records");
+    revalidatePath("/admin/booking-records");
 
     return NextResponse.json({ ok: true });
   }
 
+  // === Cleaner status-only update ===
   if (role === "cleaner") {
     if (!isStatusOnlyUpdate(body)) {
       return NextResponse.json({ error: "Cleaners can only update booking status." }, { status: 403 });
     }
     const { error } = await supabase.from("booking_records").update({ status: body.status }).eq("id", body.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+    revalidatePath("/admin-dashboard/booking-records");
+    revalidatePath("/admin/booking-records");
+
     return NextResponse.json({ ok: true });
   }
 
-  if (role !== "admin") {
-    return NextResponse.json({ error: "Only admin can edit booking records." }, { status: 403 });
+  // === Full edit (admin + data_entry) ===
+  if (role !== "admin" && role !== "data_entry") {
+    return NextResponse.json({ error: "Only admin and data entry can edit booking records." }, { status: 403 });
   }
 
   const payload = cleanBookingPayload(body);
@@ -245,18 +338,49 @@ export async function PATCH(request: NextRequest) {
   if (manpowerError) return NextResponse.json({ error: manpowerError }, { status: 400 });
   const { added_by: _ignoredAddedBy, ...updatePayload } = payload;
   void _ignoredAddedBy;
-  
-  const { data: updatedBooking, error } = await supabase.from("booking_records").update(updatePayload).eq("id", body.id).select("*").single();
+
+  const trackingPayload = {
+    ...updatePayload,
+    last_edited_by: user.id,
+    last_edited_by_name: profile?.name || user.email || "Unknown user",
+    last_edited_by_role: role,
+    last_edited_at: new Date().toISOString(),
+    edited_by_data_entry: role === "data_entry",
+  };
+
+  const { data: updatedBooking, error } = await supabase
+    .from("booking_records")
+    .update(trackingPayload)
+    .eq("id", body.id)
+    .select("*")
+    .single();
+
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  
+
+  // Assignment sync (agar cleaner IDs bheji gayi hain)
   if (Array.isArray(body.assigned_cleaner_ids)) {
-    if (role !== "admin") return NextResponse.json({ error: "Only admin can assign cleaners." }, { status: 403 });
-    await syncAssignments(supabase, body.id, body.assigned_cleaner_ids, user.id);
-    
+    if (role !== "admin" && role !== "data_entry") {
+      return NextResponse.json({ error: "Only admin and data entry can assign cleaners." }, { status: 403 });
+    }
+
+    try {
+      await syncAssignments(supabase, body.id, body.assigned_cleaner_ids, user.id);
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Failed to save assignments" },
+        { status: 500 }
+      );
+    }
+
+    // ✅ Background email — response block nahi hoga
     if (body.assigned_cleaner_ids.length > 0 && updatedBooking) {
-      await notifyCleaners(supabase, body.assigned_cleaner_ids, updatedBooking);
+      sendAssignmentEmailsInBackground(supabase, body.assigned_cleaner_ids, updatedBooking);
     }
   }
+
+  revalidatePath("/admin-dashboard/booking-records");
+  revalidatePath("/admin/booking-records");
+
   return NextResponse.json({ ok: true });
 }
 
@@ -291,5 +415,9 @@ export async function DELETE(request: NextRequest) {
   if (!id) return NextResponse.json({ error: "Booking id is required." }, { status: 400 });
   const { error } = await supabase.from("booking_records").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  revalidatePath("/admin-dashboard/booking-records");
+  revalidatePath("/admin/booking-records");
+
   return NextResponse.json({ ok: true });
 }
