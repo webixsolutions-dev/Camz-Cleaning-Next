@@ -3,6 +3,7 @@ import { enforceMutationSecurity } from "@/lib/security/http";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { sendCredentialsEmail } from "@/lib/email"; // ✅ NEW: Import kiya
 
 type UserPayload = {
   name?: string;
@@ -103,6 +104,9 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: profileError.message }, { status: 400 });
   }
+
+  // ✅ NEW: Agar account success ho gaya, toh ab email send karein
+  await sendCredentialsEmail(email, name, password, role);
 
   return NextResponse.json({ id: authData.user.id });
 }

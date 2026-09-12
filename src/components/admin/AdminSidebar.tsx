@@ -10,7 +10,6 @@ import {
   CalendarDays,
   ClipboardCheck,
   ClipboardList,
-  Building2,
   GalleryHorizontal,
   Headphones,
   Images,
@@ -18,7 +17,6 @@ import {
   LogOut,
   Menu,
   ReceiptText,
-  Scale,
   Settings2,
   ShieldCheck,
   UserCheck,
@@ -85,47 +83,6 @@ const groups: AdminGroup[] = [
         label: "Reports",
         href: "/admin-dashboard/manage/reports",
         icon: BarChart3,
-      },
-    ],
-  },
-  {
-    label: "Invoice CRM",
-    links: [
-      {
-        label: "CRM Home",
-        href: "/admin-dashboard/crm",
-        icon: LayoutDashboard,
-        roles: ["admin", "data_entry"],
-      },
-      {
-        label: "CRM Customers",
-        href: "/admin-dashboard/crm/customers",
-        icon: Users,
-        roles: ["admin", "data_entry"],
-      },
-      {
-        label: "CRM Invoices",
-        href: "/admin-dashboard/crm/invoices",
-        icon: ReceiptText,
-        roles: ["admin", "data_entry"],
-      },
-      {
-        label: "Reconciliation",
-        href: "/admin-dashboard/crm/reconciliation",
-        icon: Scale,
-        roles: ["admin", "data_entry"],
-      },
-      {
-        label: "CRM Reports",
-        href: "/admin-dashboard/crm/reports",
-        icon: BarChart3,
-        roles: ["admin", "data_entry"],
-      },
-      {
-        label: "Company Settings",
-        href: "/admin-dashboard/crm/settings",
-        icon: Building2,
-        roles: ["admin", "data_entry"],
       },
     ],
   },
@@ -224,7 +181,7 @@ export default function AdminSidebar({
   };
 
   const isActive = (href: string) => {
-    if (href === "/admin-dashboard" || href === "/admin-dashboard/crm") {
+    if (href === "/admin-dashboard") {
       return pathname === href;
     }
 

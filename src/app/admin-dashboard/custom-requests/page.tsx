@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { serviceTypes } from "@/data/customCleaning";
+import EstimatorActualsEditor from "@/components/admin/EstimatorActualsEditor";
 
 type ChecklistSection = {
   tasks?: string[];
@@ -42,6 +43,9 @@ type RequestRow = {
   preferred_date: string | null;
   status: string;
   created_at: string;
+  actual_general_minutes?: number | null;
+  actual_task_minutes?: Record<string, number> | null;
+  estimator_error_percent?: number | null;
 };
 
 type SelectedTask = {
@@ -72,6 +76,7 @@ type EstimatorSnapshot = {
   total_min_cents: number | null;
   total_max_cents: number | null;
   requires_manual_quote: boolean;
+  manual_quote_reasons?: string[];
   budget_choice: string;
 };
 
@@ -409,6 +414,8 @@ export default async function CustomRequestsPage({
                       <SummaryMetric label="Estimated total incl. GST" value={estimate.mode === "price" ? centsRange(estimate.total_min_cents, estimate.total_max_cents) : "Quote requested"} />
                     </div>
                     {estimate.mode === "price" && <div className="mt-3 grid gap-2 rounded-lg border border-blue-100 bg-white p-3 text-[10px] text-slate-600 sm:grid-cols-4"><span>Base: <b>{cents(estimate.base_price_cents)}</b></span><span>Carpet: <b>{cents(estimate.carpet_price_cents)}</b></span><span>Subtotal: <b>{centsRange(estimate.subtotal_min_cents, estimate.subtotal_max_cents)}</b></span><span>GST: <b>{centsRange(estimate.gst_min_cents, estimate.gst_max_cents)}</b></span></div>}
+                    {!!estimate.manual_quote_reasons?.length && <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3"><div className="text-[10px] font-extrabold uppercase tracking-wide text-amber-900">Assessment reasons</div><ul className="mt-1 list-disc space-y-1 pl-4 text-[10px] text-amber-800">{estimate.manual_quote_reasons.map((reason:string)=><li key={reason}>{reason}</li>)}</ul></div>}
+                    <EstimatorActualsEditor requestId={selected.id} initialActual={selected.actual_general_minutes} initialTaskMinutes={selected.actual_task_minutes}/>
                   </section>;
                 })()}
                 {/* SERVICES */}

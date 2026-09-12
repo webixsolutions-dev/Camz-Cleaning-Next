@@ -65,7 +65,7 @@ export default async function AdminDashboardLayout({
         ? {
             title: "Data Entry Dashboard",
             subtitle:
-              "Invoice CRM, booking records, and before/after images.",
+              "Create booking records and manage submitted job details.",
             icon: ClipboardCheck,
             iconClass:
               "bg-orange-50 text-orange-600",

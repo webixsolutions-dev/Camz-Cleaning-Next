@@ -21,7 +21,6 @@ type UserData = {
   approval_status: string;
   source: string;
   is_blocked: boolean;
-  customer_code?: string | null;
 };
 
 type AuthContextType = {
@@ -57,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("users")
         .select(
-        "id, name, email, role, phone_number, approval_status, source, is_blocked, customer_code",
+          "id, name, email, role, phone_number, approval_status, source, is_blocked",
         )
         .eq("id", userId)
         .maybeSingle();
@@ -122,14 +121,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     phone_number: string,
   ) => {
     try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, name, phone_number }),
+      // Step 1: Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { name, phone_number } },
       });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) return { error: payload.error || "Failed to create user" };
 
+      if (authError) return { error: authError.message };
+      if (!authData.user) return { error: "Failed to create user" };
+
+      // Use window.location for hard navigation
       window.location.href = "/login";
       return { error: null };
     } catch (error) {
@@ -170,11 +172,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         redirectTo:
           role === "admin"
             ? "/admin-dashboard"
-            : role === "data_entry"
-              ? "/admin-dashboard/crm"
-              : role === "cleaner"
-                ? "/admin-dashboard/booking-records"
-                : "/customer-dashboard",
+            : ["data_entry", "cleaner"].includes(role || "")
+              ? "/admin-dashboard/booking-records"
+              : "/customer-dashboard",
       };
     } catch (error) {
       console.error("Sign in error:", error);

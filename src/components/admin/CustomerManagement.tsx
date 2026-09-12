@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   ChevronRight,
-  Eye,
   FileText,
   Mail,
   MapPin,
@@ -22,7 +21,6 @@ import {
 
 export type CustomerRecord = {
   id: string;
-  customer_code?: string | null;
   name: string;
   email: string;
   phone_number: string | null;
@@ -104,8 +102,6 @@ export default function CustomerManagement({
   const [date, setDate] = useState("");
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
-  const [detailError, setDetailError] = useState("");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -113,7 +109,7 @@ export default function CustomerManagement({
   const filtered = useMemo(
     () =>
       customers.filter((customer) => {
-        const text = `${customer.customer_code || ""} ${customer.name} ${customer.email} ${
+        const text = `${customer.name} ${customer.email} ${
           customer.phone_number || ""
         } ${customer.address || ""}`.toLowerCase();
 
@@ -143,23 +139,6 @@ export default function CustomerManagement({
   const webCustomers = customers.filter(
     (customer) => (customer.source || "").toLowerCase() === "web",
   ).length;
-
-  const openDetail = async (customer: CustomerRecord) => {
-    setDetailError("");
-    setDetail({ loading: true, name: customer.name, customer_code: customer.customer_code });
-    try {
-      const params = customer.customer_code
-        ? `code=${encodeURIComponent(customer.customer_code)}`
-        : `id=${encodeURIComponent(customer.id)}`;
-      const response = await fetch(`/api/admin/customers?${params}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load customer.");
-      setDetail(payload.customer);
-    } catch (err) {
-      setDetail(null);
-      setDetailError(err instanceof Error ? err.message : "Unable to load customer.");
-    }
-  };
 
   const openAdd = () => {
     setForm({ ...emptyForm });
@@ -310,7 +289,7 @@ export default function CustomerManagement({
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search ID, name, email, phone or address..."
+                placeholder="Search customer, email, phone or address..."
                 className="min-w-0 flex-1 bg-transparent text-[10px] text-slate-700 outline-none placeholder:text-slate-400"
               />
             </label>
@@ -376,7 +355,6 @@ export default function CustomerManagement({
               <thead className="bg-[#F8FAFD]">
                 <tr>
                   {[
-                    "ID",
                     "Customer",
                     "Contact",
                     "Source",
@@ -388,10 +366,8 @@ export default function CustomerManagement({
                     <th
                       key={head}
                       className={`border-b border-slate-200 px-2 py-2.5 text-[8px] font-extrabold uppercase tracking-[0.06em] text-slate-400 ${
-                        head === "ID"
-                          ? "w-[8%]"
-                          : head === "Customer"
-                          ? "w-[22%]"
+                        head === "Customer"
+                          ? "w-[27%]"
                           : head === "Contact"
                             ? "w-[14%]"
                             : head === "Source"
@@ -415,12 +391,8 @@ export default function CustomerManagement({
                 {filtered.map((customer) => (
                   <tr
                     key={customer.id}
-                    className="cursor-pointer transition hover:bg-blue-50/40"
-                    onClick={() => void openDetail(customer)}
+                    className="transition hover:bg-blue-50/40"
                   >
-                    <td className="px-2 py-2.5 font-mono text-[10px] font-bold text-[#4A86F7]">
-                      {customer.customer_code || "—"}
-                    </td>
                     <td className="px-2 py-2.5">
                       <div className="flex min-w-0 items-center gap-2.5">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[11px] font-extrabold text-[#4A86F7]">
@@ -489,16 +461,8 @@ export default function CustomerManagement({
                       </span>
                     </td>
 
-                    <td className="whitespace-nowrap px-1.5 py-2.5" onClick={(event) => event.stopPropagation()}>
+                    <td className="whitespace-nowrap px-1.5 py-2.5">
                       <div className="flex flex-nowrap items-center justify-start gap-0.5">
-                        <button
-                          type="button"
-                          onClick={() => void openDetail(customer)}
-                          className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 text-[7px] font-bold text-slate-600"
-                        >
-                          <Eye size={11} />
-                          View
-                        </button>
                         <a
                           href={`/admin-dashboard/manage/invoices?customer=${customer.id}`}
                           className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md bg-[#4A86F7] px-1.5 text-[7px] font-bold text-white transition hover:bg-blue-600"
@@ -532,7 +496,7 @@ export default function CustomerManagement({
                 {!filtered.length && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={7}
                       className="px-4 py-12 text-center text-[10px] text-slate-400"
                     >
                       No customers match these filters.
@@ -555,7 +519,6 @@ export default function CustomerManagement({
 
                     <div className="min-w-0">
                       <h3 className="truncate text-[11px] font-bold text-[#13263A]">
-                        {customer.customer_code ? `#${customer.customer_code} ` : ""}
                         {customer.name}
                       </h3>
 
@@ -623,14 +586,6 @@ export default function CustomerManagement({
                 )}
 
                 <div className="mt-3 flex gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void openDetail(customer)}
-                    className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white text-[9px] font-bold text-slate-700"
-                  >
-                    <Eye size={11} />
-                    View
-                  </button>
                   <a
                     href={`/admin-dashboard/manage/invoices?customer=${customer.id}`}
                     className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#4A86F7] text-[9px] font-bold text-white"
@@ -788,52 +743,6 @@ export default function CustomerManagement({
                     : "Save Customer"}
               </button>
             </form>
-          </div>
-        </div>
-      )}
-
-      {(detail || detailError) && (
-        <div className="fixed inset-0 z-[110] flex items-end justify-center bg-slate-950/40 sm:items-center sm:p-5" onMouseDown={(event) => event.target === event.currentTarget && (setDetail(null), setDetailError(""))}>
-          <div className="max-h-[94vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl sm:rounded-xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="font-bold text-[#13263A]">Customer {String(detail?.customer_code || "")}</h2>
-              <button type="button" onClick={() => { setDetail(null); setDetailError(""); }} className="rounded-lg p-1 text-slate-400">
-                <X size={16} />
-              </button>
-            </div>
-            {detailError ? <p className="text-[12px] text-rose-700">{detailError}</p> : null}
-            {detail && !("loading" in detail && detail.loading) ? (
-              <div className="space-y-2 text-[12px] text-slate-700">
-                <p><span className="font-semibold">Name:</span> {String(detail.name || "")}</p>
-                <p><span className="font-semibold">Email:</span> {String(detail.email || "")}</p>
-                <p><span className="font-semibold">Phone:</span> {String(detail.phone_number || "—")}</p>
-                <p><span className="font-semibold">Source:</span> {String(detail.source || "—")}</p>
-                <p><span className="font-semibold">Status:</span> {detail.is_blocked ? "Blocked" : "Active"}</p>
-                <p><span className="font-semibold">Joined:</span> {detail.created_at ? formatDate(String(detail.created_at)) : "—"}</p>
-                <div>
-                  <p className="font-semibold">Addresses</p>
-                  {Array.isArray(detail.addresses) && detail.addresses.length ? (
-                    (detail.addresses as Array<{ label?: string; address_line?: string; city?: string }>).map((address, index) => (
-                      <p key={index} className="text-slate-500">{[address.label, address.address_line, address.city].filter(Boolean).join(" — ")}</p>
-                    ))
-                  ) : (
-                    <p className="text-slate-500">No saved address</p>
-                  )}
-                </div>
-                <div>
-                  <p className="font-semibold">Bookings</p>
-                  {Array.isArray(detail.bookings) && detail.bookings.length ? (
-                    (detail.bookings as Array<{ service_name?: string; date?: string; status?: string }>).map((job, index) => (
-                      <p key={index} className="text-slate-500">{job.service_name || "Job"} · {job.date || ""} · {job.status || ""}</p>
-                    ))
-                  ) : (
-                    <p className="text-slate-500">No bookings</p>
-                  )}
-                </div>
-              </div>
-            ) : !detailError ? (
-              <p className="text-[12px] text-slate-500">Loading customer...</p>
-            ) : null}
           </div>
         </div>
       )}

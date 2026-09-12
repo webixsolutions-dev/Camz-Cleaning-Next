@@ -11,23 +11,34 @@ import {
 } from "lucide-react";
 import CommonHeroSection from "@/components/common/CommonHeroSection";
 import { createClient } from "@/lib/supabase/client";
+import {
+  calculateAuthoritativeEstimate,
+  DEFAULT_ESTIMATOR_CONFIG,
+  DEFAULT_ESTIMATOR_RECOMMENDATIONS,
+  DEFAULT_ESTIMATOR_TASKS,
+  type EstimatorCategory,
+  type EstimatorCondition,
+  type EstimatorConfig,
+  type EstimatorMode,
+  type EstimatorPhase,
+  type EstimatorRecommendation,
+  type EstimatorTask,
+} from "@/lib/cleaning-estimator";
 
-type Mode = "time" | "price";
-type Condition = "maintained" | "attention" | "heavy";
-type Phase = "base" | "detail";
-type Category = "bedroom" | "bathroom" | "kitchen" | "common" | "basement";
-type Basis = "bedrooms" | "bathrooms" | "property" | "basement" | "item";
-type Task = {
-  id: string; category: Category; phase: Phase; label: string;
-  min: number; max: number; basis: Basis; baseline?: boolean;
-  helper?: string; wall?: boolean; defaultQty?: number;
-};
+type Mode = EstimatorMode;
+type Condition = EstimatorCondition;
+type Phase = EstimatorPhase;
+type Category = EstimatorCategory;
+type Task = EstimatorTask;
 type Property = {
   type: "" | "house" | "townhouse" | "condo" | "apartment";
   bedrooms: number; fullBaths: number; halfBaths: number;
   size: "under-900" | "900-1499" | "1500-1999" | "2000-2499" | "2500-plus";
   basement: "none" | "finished" | "unfinished";
-  pets: boolean; petHair: boolean; condition: Condition; cleaners: number;
+  pets: boolean; petHair: boolean; bedroomCarpet: boolean;
+  purpose: "regular" | "deep" | "move_in" | "move_out";
+  condition: Condition; cleaners: number; excessiveClutter: boolean;
+  delicateWalls: boolean; unusualScope: boolean;
 };
 type Carpet = {
   enabled: boolean; rooms: number; largeRooms: number; halls: number;
@@ -35,90 +46,6 @@ type Carpet = {
   furniture: "customer" | "assessment" | "none";
 };
 type Range = { min: number; max: number };
-
-const FALLBACK_CONFIG = {
-  version: "camz-estimator-2026-09-v1",
-  baseCents: 17900,
-  includedMinutes: 240,
-  extraHourCents: 4000,
-  incrementMinutes: 15,
-  gstRate: 0.05,
-  carpetMinimumCents: 10000,
-  carpetRoomCents: 4000,
-  carpetHallCents: 2500,
-  carpetStairsCents: 5000,
-  carpetClosetCents: 1500,
-  carpetHeavyFromCents: 2500,
-  manualQuoteMinutes: 600,
-  popupTriggerMinutes: 210,
-  timeModeEnabled: true,
-  priceModeEnabled: true,
-} as const;
-const CONFIG = FALLBACK_CONFIG;
-
-const t = (
-  id: string, category: Category, phase: Phase, label: string,
-  min: number, max: number, basis: Basis, extra: Partial<Task> = {},
-): Task => ({ id, category, phase, label, min, max, basis, ...extra });
-
-const FALLBACK_TASKS: Task[] = [
-  t("bed_dust","bedroom","base","General dusting and accessible surfaces",8,12,"bedrooms",{baseline:true}),
-  t("bed_vacuum","bedroom","base","Vacuum flooring",5,10,"bedrooms",{baseline:true}),
-  t("bed_mop","bedroom","base","Mop hard flooring",5,8,"bedrooms"),
-  t("bed_furniture","bedroom","base","Wipe accessible furniture surfaces",5,10,"bedrooms",{baseline:true}),
-  t("bed_baseboards","bedroom","detail","Detail baseboards",8,12,"bedrooms"),
-  t("bed_sills","bedroom","detail","Clean window sills and ledges",3,5,"item",{defaultQty:1}),
-  t("bed_blinds","bedroom","detail","Detail blinds",5,10,"item",{defaultQty:1}),
-  t("bed_doors","bedroom","detail","Wipe doors and frames",3,6,"bedrooms"),
-  t("bed_closet","bedroom","detail","Clean accessible empty closet interior",10,20,"item",{defaultQty:1,helper:"Closet must be empty and accessible."}),
-  t("bed_wall_spot","bedroom","detail","Spot-clean accessible wall marks",15,30,"item",{defaultQty:1,wall:true}),
-  t("bed_wall_full","bedroom","detail","Full wall washing",30,60,"item",{defaultQty:1,wall:true,helper:"Large or heavily soiled walls may require assessment."}),
-
-  t("bath_toilet","bathroom","base","Clean and disinfect toilet",7,10,"bathrooms",{baseline:true}),
-  t("bath_sink","bathroom","base","Clean sink, vanity and counter",7,10,"bathrooms",{baseline:true}),
-  t("bath_mirror","bathroom","base","Clean mirror",3,5,"bathrooms",{baseline:true}),
-  t("bath_tub","bathroom","base","Routine tub or shower cleaning",10,15,"bathrooms",{baseline:true}),
-  t("bath_floor","bathroom","base","Vacuum and mop bathroom floor",5,8,"bathrooms",{baseline:true}),
-  t("bath_cabinets","bathroom","detail","Wipe exterior cabinets",5,8,"bathrooms"),
-  t("bath_baseboards","bathroom","detail","Detail baseboards",5,8,"bathrooms"),
-  t("bath_doors","bathroom","detail","Wipe doors and frames",3,5,"bathrooms"),
-  t("bath_soap","bathroom","detail","Heavy soap scum or mineral buildup",15,30,"item",{defaultQty:1,helper:"Apply only to affected bathrooms."}),
-  t("bath_grout","bathroom","detail","Detailed grout attention",15,30,"item",{defaultQty:1}),
-  t("bath_wall_spot","bathroom","detail","Spot-clean accessible wall marks",10,20,"item",{defaultQty:1,wall:true}),
-  t("bath_wall_full","bathroom","detail","Full bathroom wall washing",25,45,"item",{defaultQty:1,wall:true}),
-
-  t("kit_surfaces","kitchen","base","Counters and accessible surfaces",8,12,"property",{baseline:true}),
-  t("kit_sink","kitchen","base","Clean sink and faucet",5,8,"property",{baseline:true}),
-  t("kit_cooktop","kitchen","base","Clean cooktop exterior",8,12,"property",{baseline:true}),
-  t("kit_appliances","kitchen","base","Wipe appliance exteriors",8,12,"property",{baseline:true}),
-  t("kit_floor","kitchen","base","Vacuum and mop kitchen floor",10,15,"property",{baseline:true}),
-  t("kit_backsplash","kitchen","detail","Detail backsplash",5,10,"property"),
-  t("kit_cabinet_fronts","kitchen","detail","Detail cabinet fronts",10,20,"property"),
-  t("kit_baseboards","kitchen","detail","Detail baseboards",8,12,"property"),
-  t("kit_oven","kitchen","detail","Clean inside oven",30,60,"item",{defaultQty:1,helper:"Severe carbon buildup may require assessment."}),
-  t("kit_fridge","kitchen","detail","Clean inside emptied refrigerator",25,45,"item",{defaultQty:1,helper:"Customer removes food before arrival."}),
-  t("kit_cabinets","kitchen","detail","Clean inside emptied cabinets",45,90,"property",{helper:"Cabinets must be empty and accessible."}),
-  t("kit_grease","kitchen","detail","Heavy grease or buildup",30,120,"property",{helper:"Results depend on material and severity."}),
-  t("kit_wall_spot","kitchen","detail","Spot-clean accessible wall marks",15,30,"property",{wall:true}),
-  t("kit_wall_full","kitchen","detail","Full kitchen wall washing",30,60,"property",{wall:true}),
-
-  t("common_living","common","base","Living room general cleaning",25,40,"property",{baseline:true}),
-  t("common_dining","common","base","Dining area cleaning",15,25,"property",{baseline:true}),
-  t("common_hall","common","base","Hall and entrance cleaning",10,20,"property",{baseline:true}),
-  t("common_stairs","common","base","Vacuum and wipe standard staircase",10,20,"item",{defaultQty:1}),
-  t("common_baseboards","common","detail","Detail common-area baseboards",15,30,"property"),
-  t("common_sills","common","detail","Clean window sills",3,5,"item",{defaultQty:4}),
-  t("common_blinds","common","detail","Detail blinds",5,10,"item",{defaultQty:4}),
-  t("common_doors","common","detail","Detail interior doors and frames",3,6,"item",{defaultQty:3}),
-  t("common_wall_spot","common","detail","Spot-clean wall marks in selected area",15,30,"item",{defaultQty:1,wall:true}),
-  t("common_wall_full","common","detail","Full wall washing in selected area",30,60,"item",{defaultQty:1,wall:true}),
-  t("common_pet_hair","common","detail","Heavy pet-hair detailing",30,90,"property"),
-
-  t("basement_general","basement","base","Basement common-area cleaning",30,60,"basement",{baseline:true}),
-  t("basement_stairs","basement","detail","Detail basement stairs",10,20,"basement"),
-  t("basement_baseboards","basement","detail","Detail basement baseboards",15,30,"basement"),
-];
-const TASKS = FALLBACK_TASKS;
 
 const CATEGORIES: { id: Category; label: string; description: string }[] = [
   {id:"bedroom",label:"Bedrooms",description:"General room cleaning and selected details"},
@@ -136,9 +63,6 @@ const areaPrefixes: Record<ServiceArea, RegExp> = {
 };
 const postalPattern = /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ][ -]?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i;
 const inputClass = "h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#00B7EB] focus:ring-2 focus:ring-[#00B7EB]/20";
-const wallDisclaimer = "Stain and mark removal is not guaranteed. Permanent stains, ink, grease, discoloration, paint transfer, damage, absorbed marks, and delicate or damaged paint may remain or limit the method that can safely be used.";
-const carpetDisclaimer = "Professional carpet cleaning improves soil removal and appearance, but stain, odour and discoloration removal is not guaranteed. Results depend on carpet fibre, age, prior treatments, contamination, stain type and depth. Specialty stain or pet treatment may require assessment and additional charges.";
-
 const clamp = (n:number,min:number,max:number) => Math.min(max,Math.max(min,n));
 const money = (n:number) => `$${(n/100).toFixed(2)}`;
 const round15 = (n:number) => Math.round(n/15)*15;
@@ -153,19 +77,26 @@ const trackEstimatorEvent=(event:string,details:Record<string,unknown>={})=>{
   const analyticsWindow=window as Window&{dataLayer?:Array<Record<string,unknown>>;gtag?:(...args:unknown[])=>void};
   analyticsWindow.dataLayer?.push({event,...details});
   analyticsWindow.gtag?.("event",event,details);
+  const storageKey="camz-estimator-session";
+  let sessionId=window.sessionStorage.getItem(storageKey);
+  if(!sessionId){sessionId=crypto.randomUUID();window.sessionStorage.setItem(storageKey,sessionId);}
+  void fetch("/api/custom-cleaning-estimator/events",{method:"POST",headers:{"Content-Type":"application/json"},keepalive:true,body:JSON.stringify({session_id:sessionId,event_name:event.replace(/^camz_estimator_/,""),mode:details.mode,details})}).catch(()=>undefined);
 };
 
 export default function CustomCleaningRequestPage() {
-  const [CONFIG,setConfig]=useState(FALLBACK_CONFIG);
-  const [TASKS,setTasks]=useState<Task[]>(FALLBACK_TASKS);
+  const [CONFIG,setConfig]=useState<EstimatorConfig>(DEFAULT_ESTIMATOR_CONFIG);
+  const [TASKS,setTasks]=useState<Task[]>(DEFAULT_ESTIMATOR_TASKS);
+  const [recommendations,setRecommendations]=useState<EstimatorRecommendation[]>(DEFAULT_ESTIMATOR_RECOMMENDATIONS);
   const [mode,setMode]=useState<Mode|null>(null);
   const [step,setStep]=useState(1);
   const [property,setProperty]=useState<Property>({
     type:"",bedrooms:1,fullBaths:1,halfBaths:0,size:"900-1499",
-    basement:"none",pets:false,petHair:false,condition:"maintained",cleaners:2,
+    basement:"none",pets:false,petHair:false,bedroomCarpet:false,purpose:"regular",
+    condition:"maintained",cleaners:2,excessiveClutter:false,delicateWalls:false,unusualScope:false,
   });
   const [selectedIds,setSelectedIds]=useState<string[]>([]);
   const [quantities,setQuantities]=useState<Record<string,number>>({});
+  const [itemConditions,setItemConditions]=useState<Record<string,Condition>>({});
   const [expanded,setExpanded]=useState<Category|null>("bedroom");
   const [baselineReady,setBaselineReady]=useState(false);
   const [carpet,setCarpet]=useState<Carpet>({
@@ -180,7 +111,8 @@ export default function CustomCleaningRequestPage() {
   const [photos,setPhotos]=useState<File[]>([]);
   const [locationError,setLocationError]=useState("");
   const [photoError,setPhotoError]=useState("");
-  const [noticeDismissed,setNoticeDismissed]=useState(false);
+  const [dismissedNotices,setDismissedNotices]=useState<string[]>([]);
+  const [dismissedRecommendations,setDismissedRecommendations]=useState<string[]>([]);
   const [terms,setTerms]=useState(false);
   const [status,setStatus]=useState<"idle"|"submitting"|"success"|"error">("idle");
   const [errorMessage,setErrorMessage]=useState("");
@@ -193,74 +125,54 @@ export default function CustomCleaningRequestPage() {
         if(!active)return;
         if(data?.config)setConfig(data.config);
         if(Array.isArray(data?.tasks)&&data.tasks.length)setTasks(data.tasks);
+        if(Array.isArray(data?.recommendations)&&data.recommendations.length)setRecommendations(data.recommendations);
       })
       .catch(()=>{/* Built-in defaults keep the estimator available during a temporary settings outage. */});
     return()=>{active=false;};
   },[]);
   useEffect(()=>{if(mode)trackEstimatorEvent("camz_estimator_step_view",{mode,step});},[mode,step]);
-  const sizeFactor:Record<Property["size"],number>={
-    "under-900":0.9,"900-1499":1,"1500-1999":1.15,"2000-2499":1.3,"2500-plus":1.5,
-  };
-
   const categoryAvailable=(category:Category)=>{
     if(category==="bedroom") return property.bedrooms>0;
     if(category==="bathroom") return property.fullBaths+property.halfBaths>0;
     if(category==="basement") return property.basement!=="none";
     return true;
   };
-  const qty=(task:Task)=>{
-    if(task.basis==="bedrooms") return property.bedrooms;
-    if(task.basis==="bathrooms") return property.fullBaths+property.halfBaths*0.6;
-    if(task.basis==="basement") return property.basement==="none"?0:1;
-    if(task.basis==="item") return quantities[task.id]??task.defaultQty??1;
-    return sizeFactor[property.size];
-  };
-  const selectedTasks=useMemo(()=>TASKS.filter(task=>selectedIds.includes(task.id)),[selectedIds]);
-  const conditionFactor=property.condition==="maintained"?1:property.condition==="attention"?1.2:1.45;
-  const rawMinutes=useMemo(()=>selectedTasks.reduce((sum,task)=>({
-    min:sum.min+task.min*qty(task),max:sum.max+task.max*qty(task),
-  }),{min:0,max:0}),[
-    selectedTasks,quantities,property.bedrooms,property.fullBaths,
-    property.halfBaths,property.basement,property.size,
-  ]);
-  const actualMinutes={min:rawMinutes.min*conditionFactor,max:rawMinutes.max*conditionFactor};
-  const shownMinutes={
-    min:mode==="price"?Math.max(CONFIG.includedMinutes,actualMinutes.min):actualMinutes.min,
-    max:mode==="price"?Math.max(CONFIG.includedMinutes,actualMinutes.max):actualMinutes.max,
-  };
-  const priceFor=(minutes:number)=>{
-    if(budget==="fixed"||minutes<=CONFIG.includedMinutes) return CONFIG.baseCents;
-    const extra=Math.ceil((minutes-CONFIG.includedMinutes)/CONFIG.incrementMinutes)*CONFIG.incrementMinutes;
-    return CONFIG.baseCents+Math.round(extra/60*CONFIG.extraHourCents);
-  };
-  const generalPrice={min:priceFor(shownMinutes.min),max:priceFor(shownMinutes.max)};
+  const defaultQty=(task:Task)=>task.basis==="bedrooms"?property.bedrooms:task.basis==="bathrooms"?Math.max(1,property.fullBaths+property.halfBaths):task.basis==="basement"?(property.basement==="none"?0:1):(task.defaultQty??1);
+  const qty=(task:Task)=>quantities[task.id]??defaultQty(task);
+  const availableTasks=useMemo(()=>TASKS.filter(task=>task.customerVisible&&task.adminActive),[TASKS]);
+  const visibleTasks=useMemo(()=>availableTasks.filter(task=>mode!=="price"||task.priceModeVisible||selectedIds.includes(task.id)),[availableTasks,mode,selectedIds]);
+  const selectedTasks=useMemo(()=>availableTasks.filter(task=>selectedIds.includes(task.id)),[selectedIds,availableTasks]);
+  const calculation=useMemo(()=>calculateAuthoritativeEstimate({
+    mode:mode||"time",budget,property:{...property,clutter:property.excessiveClutter?"excessive":"low"},carpet,
+    selected:selectedIds.map(task_id=>({task_id,quantity:quantities[task_id],condition:itemConditions[task_id]})),
+  },CONFIG,availableTasks),[mode,budget,property,carpet,selectedIds,quantities,itemConditions,CONFIG,availableTasks]);
+  const snapshot=calculation.estimate;
+  const actualMinutes={min:snapshot.general_minutes_min,max:snapshot.general_minutes_max};
+  const shownMinutes={min:snapshot.display_minutes_min,max:snapshot.display_minutes_max};
+  const generalPrice={min:snapshot.general_price_min_cents??CONFIG.baseCents,max:snapshot.general_price_max_cents??CONFIG.baseCents};
   const carpetSelected=carpet.enabled&&(carpet.rooms+carpet.largeRooms+carpet.halls+carpet.stairs+carpet.closets>0);
-  const carpetComponents=(carpet.rooms>0?CONFIG.carpetMinimumCents+Math.max(0,carpet.rooms-1)*CONFIG.carpetRoomCents:0)
-    +carpet.largeRooms*Math.round(CONFIG.carpetRoomCents*1.5)
-    +carpet.halls*CONFIG.carpetHallCents+carpet.stairs*CONFIG.carpetStairsCents
-    +carpet.closets*CONFIG.carpetClosetCents+(carpet.heavySoil?CONFIG.carpetHeavyFromCents:0);
-  const carpetPrice=carpetSelected?Math.max(CONFIG.carpetMinimumCents,carpetComponents):0;
-  const carpetMinutes=carpetSelected?{
-    min:30+Math.max(0,carpet.rooms-1)*20+carpet.largeRooms*30+carpet.halls*10+carpet.stairs*20+carpet.closets*5+(carpet.heavySoil?10:0),
-    max:45+Math.max(0,carpet.rooms-1)*30+carpet.largeRooms*45+carpet.halls*15+carpet.stairs*30+carpet.closets*10+(carpet.heavySoil?30:0),
-  }:{min:0,max:0};
-  const subtotal={min:generalPrice.min+carpetPrice,max:generalPrice.max+carpetPrice};
-  const gst={min:Math.round(subtotal.min*CONFIG.gstRate),max:Math.round(subtotal.max*CONFIG.gstRate)};
-  const total={min:subtotal.min+gst.min,max:subtotal.max+gst.max};
-  const fullWalls=selectedIds.some(id=>id.endsWith("wall_full"));
-  const manual=property.condition==="heavy"||fullWalls||carpet.petTreatment||actualMinutes.max>CONFIG.manualQuoteMinutes;
+  const carpetPrice=snapshot.carpet_price_cents??0;
+  const carpetMinutes={min:snapshot.carpet_service_minutes_min,max:snapshot.carpet_service_minutes_max};
+  const subtotal={min:snapshot.subtotal_min_cents??0,max:snapshot.subtotal_max_cents??0};
+  const gst={min:snapshot.gst_min_cents??0,max:snapshot.gst_max_cents??0};
+  const total={min:snapshot.total_min_cents??0,max:snapshot.total_max_cents??0};
+  const manual=snapshot.requires_manual_quote;
+  const manualReasons=snapshot.manual_quote_reasons;
   const selectedCategories=CATEGORIES.filter(c=>selectedTasks.some(task=>task.category===c.id));
-  const nearBase=actualMinutes.max>=CONFIG.popupTriggerMinutes;
+  const noticeState=actualMinutes.max>CONFIG.includedMinutes?"exceeded":actualMinutes.max>=CONFIG.popupTriggerMinutes?"near":null;
+  const photosRequired=property.condition==="heavy"||property.condition==="very_heavy"||property.delicateWalls||property.unusualScope||carpet.petTreatment;
   const today=new Date().toISOString().slice(0,10);
 
   const toggleTask=(task:Task)=>{
     setSelectedIds(current=>current.includes(task.id)?current.filter(id=>id!==task.id):[...current,task.id]);
-    if(task.basis==="item"&&quantities[task.id]===undefined)
-      setQuantities(current=>({...current,[task.id]:task.defaultQty??1}));
+    if(quantities[task.id]===undefined)setQuantities(current=>({...current,[task.id]:defaultQty(task)}));
+    if(task.conditionProfile&&itemConditions[task.id]===undefined)setItemConditions(current=>({...current,[task.id]:property.condition}));
   };
+  const addRecommendation=(rule:EstimatorRecommendation)=>{const allowed=new Set(visibleTasks.map(task=>task.id));setSelectedIds(current=>Array.from(new Set([...current,...rule.taskIds.filter(id=>allowed.has(id))])));setQuantities(current=>{const next={...current};for(const id of rule.taskIds){const task=visibleTasks.find(item=>item.id===id);if(task&&next[id]===undefined)next[id]=defaultQty(task);}return next;});if(rule.enablesCarpet)setCarpet(current=>({...current,enabled:true,rooms:Math.max(1,current.rooms)}));setDismissedRecommendations(current=>[...current,rule.id]);trackEstimatorEvent("camz_estimator_recommendation_accepted",{mode,rule_id:rule.id});};
+  const recommendationApplies=(rule:EstimatorRecommendation)=>!dismissedRecommendations.includes(rule.id)&&(rule.trigger==="kitchen"||(rule.trigger==="bedroom_carpet"&&property.bedroomCarpet)||(rule.trigger==="pets"&&property.pets)||(rule.trigger==="move_out"&&(property.purpose==="move_in"||property.purpose==="move_out"))||(rule.trigger==="bathroom"&&property.fullBaths+property.halfBaths>0)||(rule.trigger==="basement"&&property.basement!=="none"));
   const next=()=>{
     if(step===1&&!baselineReady){
-      setSelectedIds(TASKS.filter(task=>task.baseline&&categoryAvailable(task.category)).map(task=>task.id));
+      setSelectedIds(visibleTasks.filter(task=>task.baseline&&categoryAvailable(task.category)).map(task=>task.id));
       setBaselineReady(true);
     }
     if(step<STEPS.length)setStep(current=>current+1);
@@ -271,9 +183,9 @@ export default function CustomCleaningRequestPage() {
     window.scrollTo({top:360,behavior:"smooth"});
   };
   const sectionMinutes=(category:Category,phase:Phase)=>{
-    const raw=TASKS.filter(task=>task.category===category&&task.phase===phase&&selectedIds.includes(task.id))
-      .reduce((sum,task)=>({min:sum.min+task.min*qty(task),max:sum.max+task.max*qty(task)}),{min:0,max:0});
-    return {min:raw.min*conditionFactor,max:raw.max*conditionFactor};
+    const ids=visibleTasks.filter(task=>task.category===category&&task.phase===phase&&selectedIds.includes(task.id)).map(task=>task.id);
+    const result=calculateAuthoritativeEstimate({mode:mode||"time",budget,property,carpet:{...carpet,enabled:false},selected:ids.map(task_id=>({task_id,quantity:quantities[task_id],condition:itemConditions[task_id]}))},CONFIG,availableTasks).estimate;
+    return {min:result.general_minutes_min,max:result.general_minutes_max};
   };
   const movePriority=(category:Category,direction:-1|1)=>{
     setPriorities(current=>{
@@ -295,6 +207,7 @@ export default function CustomCleaningRequestPage() {
   const handleSubmit=async(event:FormEvent<HTMLFormElement>)=>{
     event.preventDefault();
     if(step!==STEPS.length||!terms)return;
+    if(photosRequired&&photos.length===0){setPhotoError("Please add at least one condition photo for heavy, unusual, delicate-wall or specialty treatment review.");return;}
     const form=new FormData(event.currentTarget);
     const compact=postalCode.replace(/\s|-/g,"").toUpperCase();
     const normalized=compact.length===6?`${compact.slice(0,3)} ${compact.slice(3)}`:postalCode.trim().toUpperCase();
@@ -316,10 +229,7 @@ export default function CustomCleaningRequestPage() {
       if(error){setStatus("error");setErrorMessage("We could not attach the photos. Check their size and try again.");return;}
       photoPaths.push(path);
     }
-    const taskSnapshot=selectedTasks.map(task=>({
-      task_id:task.id,category:task.category,label:task.label,
-      minutes_min:task.min,minutes_max:task.max,quantity:qty(task),quantity_basis:task.basis,
-    }));
+    const taskSnapshot=calculation.selectedTasks;
     const estimate={
       estimator_version:CONFIG.version,mode,
       general_minutes_min:Math.round(actualMinutes.min),general_minutes_max:Math.round(actualMinutes.max),
@@ -336,9 +246,9 @@ export default function CustomCleaningRequestPage() {
       carpet_price_cents:mode==="price"?carpetPrice:null,
       subtotal_min_cents:mode==="price"?subtotal.min:null,
       subtotal_max_cents:mode==="price"?subtotal.max:null,
-      gst_rate:CONFIG.gstRate,gst_min_cents:mode==="price"?gst.min:null,gst_max_cents:mode==="price"?gst.max:null,
+      gst_enabled:CONFIG.gstEnabled,gst_rate:CONFIG.gstRate,gst_min_cents:mode==="price"?gst.min:null,gst_max_cents:mode==="price"?gst.max:null,
       total_min_cents:mode==="price"?total.min:null,total_max_cents:mode==="price"?total.max:null,
-      requires_manual_quote:manual,calculated_at:new Date().toISOString(),
+      requires_manual_quote:manual,manual_quote_reasons:manualReasons,calculated_at:new Date().toISOString(),
     };
     const payload={
       id:requestId,customer_name:form.get("customer_name"),email:form.get("email"),
@@ -347,7 +257,7 @@ export default function CustomCleaningRequestPage() {
       property_details:{...property,service_area:serviceArea,postal_code:normalized,province:"Alberta",country:"Canada",
         frequency,parking:form.get("parking"),access_method:form.get("access_method"),estimate},
       checklist:{selected_tasks:taskSnapshot,carpet,priority_order:priorities.filter(category=>selectedCategories.some(item=>item.id===category)),
-        photo_paths:photoPaths,consent:{terms_accepted:true,accepted_at:new Date().toISOString()}},
+        photo_paths:photoPaths,recommendations_dismissed:dismissedRecommendations,consent:{terms_accepted:true,accepted_at:new Date().toISOString()}},
       if_time_allows:form.get("if_time_allows"),additional_notes:form.get("additional_notes"),
       preferred_contact:form.get("preferred_contact"),preferred_date:form.get("preferred_date"),
       status:"new",mode,budget,
@@ -357,7 +267,7 @@ export default function CustomCleaningRequestPage() {
     });
     const result=await response.json().catch(()=>({}));
     if(!response.ok){setStatus("error");setErrorMessage(result.error||"We could not submit your cleaning plan. Please try again.");return;}
-    trackEstimatorEvent("camz_estimator_submit",{mode,budget,requires_manual_quote:manual,selected_task_count:selectedTasks.length});
+    trackEstimatorEvent("camz_estimator_submitted",{mode,budget,requires_manual_quote:manual,selected_task_count:selectedTasks.length});
     setReference(result.reference||requestId.slice(0,8).toUpperCase());setStatus("success");
     window.scrollTo({top:0,behavior:"smooth"});
   };
@@ -365,7 +275,7 @@ export default function CustomCleaningRequestPage() {
   const taskGroups=(phase:Phase)=>(
     <div className="space-y-3">
       {CATEGORIES.filter(category=>categoryAvailable(category.id)).map(category=>{
-        const tasks=TASKS.filter(task=>task.category===category.id&&task.phase===phase);
+        const tasks=visibleTasks.filter(task=>task.category===category.id&&task.phase===phase);
         if(!tasks.length)return null;
         const open=expanded===category.id;
         const count=tasks.filter(task=>selectedIds.includes(task.id)).length;
@@ -379,19 +289,20 @@ export default function CustomCleaningRequestPage() {
           </button>
           {open&&<div className="space-y-3 border-t border-slate-200 bg-slate-50 p-4 sm:p-5">
             {tasks.map(task=>{
-              const checked=selectedIds.includes(task.id),quantity=qty(task);
+              const checked=selectedIds.includes(task.id),quantity=qty(task),condition=itemConditions[task.id]||property.condition,range=task.conditionProfile==="window"?CONFIG.windowConditionMinutes[condition]:task.conditionProfile==="detail"?CONFIG.detailConditionMinutes[condition]:{min:task.min*(CONFIG.conditionFactors[property.condition]||1),max:task.max*(CONFIG.conditionFactors[property.condition]||1)};
               return <div key={task.id} className={`rounded-lg border p-3 ${checked?"border-[#00B7EB] bg-white":"border-slate-200 bg-white/70"}`}>
                 <label className="flex cursor-pointer items-start gap-3">
                   <input type="checkbox" checked={checked} onChange={()=>toggleTask(task)} className="mt-1 h-5 w-5 shrink-0 accent-[#0B4E9B]"/>
                   <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-900">{task.label}</span>
-                    <span className="mt-1 block text-xs text-slate-500">~{task.min}-{task.max} min {task.basis==="bedrooms"||task.basis==="bathrooms"?"per room":task.basis==="item"?"per item":""}</span>
+                    <span className="mt-1 block text-xs text-slate-500">~{range.min}-{range.max} min {task.basis==="bedrooms"||task.basis==="bathrooms"?"per room":task.basis==="item"?"per item":"per area"}</span>
                     {task.helper&&<span className="mt-1 block text-xs text-slate-500">{task.helper}</span>}</span>
                 </label>
-                {checked&&task.basis==="item"&&<div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
-                  <span className="text-xs font-semibold text-slate-600">Quantity</span>
+                {checked&&<div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+                  <span className="text-xs font-semibold text-slate-600">{task.basis==="bedrooms"?"Bedrooms":task.basis==="bathrooms"?"Bathrooms":task.basis==="property"?"Areas / units":"Quantity"}</span>
                   <Counter value={quantity} min={1} max={30} onChange={value=>setQuantities(current=>({...current,[task.id]:value}))}/>
                 </div>}
-                {checked&&task.wall&&<p className="mt-3 rounded-md bg-amber-50 p-3 text-xs leading-relaxed text-amber-900"><Info className="mr-1 inline" size={14}/>{wallDisclaimer}</p>}
+                {checked&&task.conditionProfile&&<label className="mt-3 block border-t border-slate-100 pt-3 text-xs font-semibold text-slate-600">Condition per item<select value={condition} onChange={event=>setItemConditions(current=>({...current,[task.id]:event.target.value as Condition}))} className="mt-1.5 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"><option value="maintained">Normal / maintained</option><option value="attention">Needs extra attention</option><option value="heavy">Heavy buildup</option><option value="very_heavy">Very heavy / neglected</option></select></label>}
+                {checked&&task.wall&&<p className="mt-3 rounded-md bg-amber-50 p-3 text-xs leading-relaxed text-amber-900"><Info className="mr-1 inline" size={14}/>{CONFIG.wallDisclaimer}</p>}
               </div>;
             })}
           </div>}
@@ -454,6 +365,8 @@ export default function CustomCleaningRequestPage() {
                     options={[["under-900","Under 900 sq ft"],["900-1499","900-1,499"],["1500-1999","1,500-1,999"],["2000-2499","2,000-2,499"],["2500-plus","2,500+"]]}/>
                   <Choice label="Basement" value={property.basement} onChange={value=>setProperty(current=>({...current,basement:value as Property["basement"]}))}
                     options={[["none","None"],["finished","Finished"],["unfinished","Unfinished"]]}/>
+                  <Choice label="Cleaning type" value={property.purpose} onChange={value=>setProperty(current=>({...current,purpose:value as Property["purpose"]}))} options={[["regular","Regular cleaning"],["deep","Deep cleaning"],["move_in","Move-in / empty home"],["move_out","Move-out / empty home"]]}/>
+                  {property.bedrooms>0&&<CheckRow checked={property.bedroomCarpet} onChange={value=>setProperty(current=>({...current,bedroomCarpet:value}))} title="Bedrooms have carpet" text="Shows relevant steam-clean and bedroom-detail recommendations."/>}
                   <Choice label="Pets in the home?" value={property.pets?"yes":"no"} onChange={value=>setProperty(current=>({...current,pets:value==="yes",petHair:value==="yes"?current.petHair:false}))}
                     options={[["no","No"],["yes","Yes"]]}/>
                   {property.pets&&<label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold">
@@ -461,25 +374,26 @@ export default function CustomCleaningRequestPage() {
                     Include heavy pet-hair detailing suggestions
                   </label>}
                   <Choice label="Current condition" value={property.condition} onChange={value=>setProperty(current=>({...current,condition:value as Condition}))}
-                    options={[["maintained","Maintained regularly","Normal routine cleaning"],["attention","Needs extra attention","Some buildup or detail"],["heavy","Heavy buildup","Photos or assessment may be needed"]]}/>
+                    options={[["maintained","Maintained regularly","Normal routine cleaning"],["attention","Needs extra attention","Some buildup or detail"],["heavy","Heavy buildup","Condition photo required"],["very_heavy","Very heavy / neglected","Wide range and office assessment"]]}/>
+                  <div className="grid gap-3 sm:grid-cols-2"><CheckRow checked={property.excessiveClutter} onChange={value=>setProperty(current=>({...current,excessiveClutter:value}))} title="Excessive clutter / restricted access" text="Cleaning is limited to safely accessible areas and may need prioritizing."/><CheckRow checked={property.delicateWalls} onChange={value=>setProperty(current=>({...current,delicateWalls:value}))} title="Delicate or damaged wall paint" text="Wall cleaning will be assessed before work."/><CheckRow checked={property.unusualScope} onChange={value=>setProperty(current=>({...current,unusualScope:value}))} title="Very large or unusual layout" text="Flags the plan for office confirmation."/></div>
                 </div>}
 
                 {step===2&&<div className="mt-8"><p className="mb-5 text-sm text-slate-600">Baseline tasks are preselected from your property. Turn off anything you do not need.</p>{taskGroups("base")}</div>}
                 {step===3&&<div className="mt-8">
                   <p className="mb-5 text-sm text-slate-600">Add detailed work where it matters. Each choice adds estimated labour time.</p>
-                  {property.petHair&&!selectedIds.includes("common_pet_hair")&&<Recommendation onAdd={()=>{trackEstimatorEvent("camz_estimator_recommendation_accepted",{task_id:"common_pet_hair"});toggleTask(TASKS.find(task=>task.id==="common_pet_hair")!);}}/>}
+                  <div className="mb-5 space-y-3">{recommendations.filter(recommendationApplies).map(rule=><Recommendation key={rule.id} rule={rule} onAdd={()=>addRecommendation(rule)} onDismiss={()=>{setDismissedRecommendations(current=>[...current,rule.id]);trackEstimatorEvent("camz_estimator_recommendation_dismissed",{mode,rule_id:rule.id});}}/>)}</div>
                   {taskGroups("detail")}
                 </div>}
-                {step===4&&<CarpetStep carpet={carpet} setCarpet={setCarpet}/>}
+                {step===4&&<CarpetStep carpet={carpet} setCarpet={setCarpet} disclaimer={CONFIG.carpetDisclaimer} stairStepCap={CONFIG.carpetStairStepCap||14}/>} 
                 {step===5&&<SummaryStep mode={mode} setMode={setMode} priceModeEnabled={CONFIG.priceModeEnabled} shownMinutes={shownMinutes} cleaners={property.cleaners}
                   carpetSelected={carpetSelected} carpetMinutes={carpetMinutes} generalPrice={generalPrice} carpetPrice={carpetPrice}
                   subtotal={subtotal} gst={gst} total={total} manual={manual} actualMinutes={actualMinutes}
-                  budget={budget} setBudget={value=>{trackEstimatorEvent("camz_estimator_budget_selected",{budget:value});setBudget(value);}} selectedCategories={selectedCategories} selectedTasks={selectedTasks}/>}
+                  budget={budget} setBudget={value=>{trackEstimatorEvent("camz_estimator_budget_selected",{mode,budget:value});setBudget(value);}} selectedCategories={selectedCategories} selectedTasks={selectedTasks} config={CONFIG} manualReasons={manualReasons}/>} 
                 {step===6&&<ReviewStep priorities={priorities} selectedCategories={selectedCategories} selectedTasks={selectedTasks}
                   movePriority={movePriority} serviceArea={serviceArea} setServiceArea={setServiceArea}
                   postalCode={postalCode} setPostalCode={setPostalCode} locationError={locationError} setLocationError={setLocationError}
                   frequency={frequency} setFrequency={setFrequency} today={today} photos={photos} photoError={photoError}
-                  handlePhotos={handlePhotos} terms={terms} setTerms={setTerms}/>}
+                  handlePhotos={handlePhotos} terms={terms} setTerms={setTerms} photosRequired={photosRequired} consentTerms={CONFIG.consentTerms}/>} 
               </section>
               <div className="flex gap-3">
                 <button type="button" onClick={back} disabled={step===1} className="flex h-12 items-center gap-2 rounded-lg border border-slate-300 bg-white px-6 font-bold text-slate-700 disabled:opacity-40"><ArrowLeft size={18}/>Back</button>
@@ -488,7 +402,7 @@ export default function CustomCleaningRequestPage() {
               </div>
               {status==="error"&&<p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 lg:hidden">{errorMessage}</p>}
             </div>
-            <DesktopSummary mode={mode} generalMinutes={shownMinutes} cleaners={property.cleaners}
+            <DesktopSummary mode={mode} generalMinutes={shownMinutes} cleaners={property.cleaners} config={CONFIG}
               generalPrice={generalPrice} carpetSelected={carpetSelected} carpetMinutes={carpetMinutes}
               carpetPrice={carpetPrice} subtotal={subtotal} gst={gst} total={total}
               count={selectedTasks.length} manual={manual} step={step} submitting={status==="submitting"}
@@ -496,8 +410,8 @@ export default function CustomCleaningRequestPage() {
           </div>
         </form>
       </main>
-      {nearBase&&!noticeDismissed&&<BaseNotice onDismiss={()=>setNoticeDismissed(true)}/>}
-      <MobileSummary mode={mode} generalMinutes={shownMinutes} total={total} step={step}
+      {noticeState&&!dismissedNotices.includes(noticeState)&&<BaseNotice kind={noticeState} message={noticeState==="near"?CONFIG.nearIncludedMessage:CONFIG.exceededIncludedMessage} onDismiss={()=>setDismissedNotices(current=>[...current,noticeState])}/>} 
+      <MobileSummary mode={mode} generalMinutes={shownMinutes} total={total} manual={manual} step={step}
         disabled={step===1&&!property.type} canSubmit={terms&&selectedTasks.length>0} submitting={status==="submitting"} onNext={next}/>
     </>}
   </>;
@@ -518,7 +432,7 @@ function Progress({step}:{step:number}){
   </div>;
 }
 
-function CarpetStep({carpet,setCarpet}:{carpet:Carpet;setCarpet:Dispatch<SetStateAction<Carpet>>}){
+function CarpetStep({carpet,setCarpet,disclaimer,stairStepCap}:{carpet:Carpet;setCarpet:Dispatch<SetStateAction<Carpet>>;disclaimer:string;stairStepCap:number}){
   return <div className="mt-8 space-y-6">
     <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-[#0B4E9B]"><Info className="mr-2 inline" size={18}/><strong>Carpet vacuuming</strong> stays in general cleaning labour. Steam cleaning is calculated separately.</div>
     <label className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-5 ${carpet.enabled?"border-[#0B4E9B] bg-blue-50":"border-slate-200"}`}>
@@ -530,14 +444,14 @@ function CarpetStep({carpet,setCarpet}:{carpet:Carpet;setCarpet:Dispatch<SetStat
         <CounterField label="Standard rooms" value={carpet.rooms} max={12} onChange={value=>setCarpet(current=>({...current,rooms:value}))}/>
         <CounterField label="Large / oversized rooms" value={carpet.largeRooms} max={8} onChange={value=>setCarpet(current=>({...current,largeRooms:value}))}/>
         <CounterField label="Hallways" value={carpet.halls} max={8} onChange={value=>setCarpet(current=>({...current,halls:value}))}/>
-        <CounterField label="Standard staircases" value={carpet.stairs} max={6} onChange={value=>setCarpet(current=>({...current,stairs:value}))}/>
+        <CounterField label={`Standard staircases (up to ${stairStepCap} steps)`} value={carpet.stairs} max={6} onChange={value=>setCarpet(current=>({...current,stairs:value}))}/>
         <CounterField label="Walk-in closets" value={carpet.closets} max={8} onChange={value=>setCarpet(current=>({...current,closets:value}))}/>
       </div>
       <CheckRow checked={carpet.heavySoil} onChange={value=>setCarpet(current=>({...current,heavySoil:value}))} title="Heavy soil / specialty spot treatment" text="Adds assessment time and the configured starting amount."/>
       <CheckRow checked={carpet.petTreatment} onChange={value=>setCarpet(current=>({...current,petTreatment:value}))} title="Pet stain / odour treatment assessment" text="Requires assessment instead of an invented price."/>
       <Choice label="Furniture preparation" value={carpet.furniture} onChange={value=>setCarpet(current=>({...current,furniture:value as Carpet["furniture"]}))}
         options={[["customer","Customer moves furniture"],["assessment","Ask CAMZ to assess"],["none","No furniture moving"]]}/>
-      <p className="rounded-lg bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">{carpetDisclaimer}</p>
+      <p className="rounded-lg bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">{disclaimer}</p>
     </div>}
   </div>;
 }
@@ -546,25 +460,25 @@ function SummaryStep(props:{
   mode:Mode;setMode:(mode:Mode)=>void;priceModeEnabled:boolean;shownMinutes:Range;cleaners:number;carpetSelected:boolean;
   carpetMinutes:Range;generalPrice:Range;carpetPrice:number;subtotal:Range;gst:Range;total:Range;
   manual:boolean;actualMinutes:Range;budget:"fixed"|"extend";setBudget:(value:"fixed"|"extend")=>void;
-  selectedCategories:{id:Category;label:string}[];selectedTasks:Task[];
+  selectedCategories:{id:Category;label:string}[];selectedTasks:Task[];config:EstimatorConfig;manualReasons:string[];
 }){
   const {mode,setMode,priceModeEnabled,shownMinutes,cleaners,carpetSelected,carpetMinutes,generalPrice,carpetPrice,
-    subtotal,gst,total,manual,actualMinutes,budget,setBudget,selectedCategories,selectedTasks}=props;
+    subtotal,gst,total,manual,actualMinutes,budget,setBudget,selectedCategories,selectedTasks,config,manualReasons}=props;
   return <div className="mt-8 space-y-6">
     <div className="grid gap-4 sm:grid-cols-2">
       <Metric label="General cleaning labour" value={durationRange(shownMinutes)}/>
       <Metric label={`Likely on-site duration · ${cleaners} cleaners`} value={durationRange({min:shownMinutes.min/cleaners,max:shownMinutes.max/cleaners})}/>
       {carpetSelected&&<Metric label="Carpet steam service" value={durationRange(carpetMinutes)}/>}
     </div>
-    {mode==="price"?<PriceBox generalPrice={generalPrice} carpetPrice={carpetPrice} subtotal={subtotal} gst={gst} total={total} manual={manual}/>:<div className="rounded-xl border border-cyan-200 bg-cyan-50 p-5">
+    {mode==="price"?<PriceBox generalPrice={generalPrice} carpetPrice={carpetPrice} subtotal={subtotal} gst={gst} total={total} manual={manual} config={config} manualReasons={manualReasons}/>:<div className="rounded-xl border border-cyan-200 bg-cyan-50 p-5">
       <h3 className="font-bold text-[#0B4E9B]">Want a price too?</h3><p className="mt-1 text-sm text-slate-600">Switch without losing any selections.</p>
       {priceModeEnabled&&<button type="button" onClick={()=>setMode("price")} className="mt-4 rounded-lg bg-[#0B4E9B] px-5 py-3 text-sm font-bold text-white">Show my estimated price</button>}
     </div>}
-    {actualMinutes.max>CONFIG.includedMinutes&&<div><h3 className="mb-3 font-bold">Choose your time and budget approach</h3>
+    {actualMinutes.max>config.includedMinutes&&<div><h3 className="mb-3 font-bold">Choose your time and budget approach</h3>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Selection selected={budget==="fixed"} title={mode==="price"?"Keep my cleaning within $179":"Keep within the included 4 man-hours"} text="Work through priorities for up to the included 4 man-hours." onClick={()=>setBudget("fixed")}/>
+        <Selection selected={budget==="fixed"} title={mode==="price"?`Keep my cleaning within ${money(config.baseCents)}`:`Keep within ${duration(config.includedMinutes)}`} text={`Work through priorities for up to ${duration(config.includedMinutes)}.`} onClick={()=>setBudget("fixed")}/>
         <Selection selected={budget==="extend"} title="Include estimated additional time" text="Authorize likely additional cleaning time shown in the estimate." onClick={()=>setBudget("extend")}/>
-      </div><p className="mt-3 text-xs leading-relaxed text-slate-500">This is a time-based service. For fixed-time bookings, priority areas are addressed first and every selected task may not be completed.</p></div>}
+      </div><p className="mt-3 text-xs leading-relaxed text-slate-500">{config.fixedTimeDisclaimer}</p></div>}
     <div><h3 className="mb-3 font-bold">Selected scope</h3><div className="space-y-2">
       {selectedCategories.map(category=><div key={category.id} className="flex justify-between rounded-lg border border-slate-200 p-3 text-sm"><strong>{category.label}</strong><span className="text-slate-500">{selectedTasks.filter(task=>task.category===category.id).length} tasks</span></div>)}
     </div></div>
@@ -576,7 +490,7 @@ function ReviewStep(props:{
   movePriority:(category:Category,direction:-1|1)=>void;serviceArea:string;setServiceArea:(value:string)=>void;
   postalCode:string;setPostalCode:(value:string)=>void;locationError:string;setLocationError:(value:string)=>void;
   frequency:string;setFrequency:(value:string)=>void;today:string;photos:File[];photoError:string;
-  handlePhotos:(files:FileList|null)=>void;terms:boolean;setTerms:(value:boolean)=>void;
+  handlePhotos:(files:FileList|null)=>void;terms:boolean;setTerms:(value:boolean)=>void;photosRequired:boolean;consentTerms:string[];
 }){
   const p=props;
   const visible=p.priorities.filter(category=>p.selectedCategories.some(item=>item.id===category));
@@ -608,14 +522,13 @@ function ReviewStep(props:{
       <Field label="Preferred service date" name="preferred_date" type="date" min={p.today} required/>
       <TextArea label="If time allows" name="if_time_allows" placeholder="What else should the team prioritize if time allows?"/>
       <TextArea label="Special instructions" name="additional_notes" placeholder="Access details, delicate surfaces, allergies or other notes..." wide/>
-      <div className="sm:col-span-2"><label htmlFor="assessment_photos" className="mb-2 block text-sm font-semibold">Condition photos <span className="font-normal text-slate-500">(optional, up to 6)</span></label>
-        <input id="assessment_photos" type="file" accept="image/*" multiple onChange={event=>p.handlePhotos(event.target.files)} className="block w-full rounded-lg border border-dashed border-slate-300 p-4 text-sm"/>
+      <div className="sm:col-span-2"><label htmlFor="assessment_photos" className="mb-2 block text-sm font-semibold">Condition photos <span className="font-normal text-slate-500">({p.photosRequired?"required":"optional"}, up to 6)</span></label>
+        <input id="assessment_photos" type="file" accept="image/*" multiple required={p.photosRequired} onChange={event=>p.handlePhotos(event.target.files)} className="block w-full rounded-lg border border-dashed border-slate-300 p-4 text-sm"/>
         {p.photos.length>0&&<p className="mt-2 text-xs text-slate-500">{p.photos.length} photo(s) ready.</p>}{p.photoError&&<p role="alert" className="mt-2 text-sm text-red-700">{p.photoError}</p>}</div>
     </div>
     <div className={`rounded-lg border p-3 text-sm ${p.locationError?"border-red-200 bg-red-50 text-red-700":"border-blue-100 bg-blue-50 text-[#0B4E9B]"}`} role={p.locationError?"alert":undefined}><MapPin className="mr-2 inline" size={18}/>{p.locationError||"We serve Calgary, Airdrie, Cochrane and Chestermere, Alberta."}</div>
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
-      <p>Estimated time is based on the details supplied. Actual time may vary with condition, buildup, clutter, accessibility, materials and work required.</p>
-      <p>Spot, wall-mark, carpet-stain and odour removal cannot be guaranteed. Identify delicate, damaged or restricted surfaces before work begins.</p>
+      {p.consentTerms.map(term=><p key={term}>• {term}</p>)}
       <label className="flex cursor-pointer items-start gap-3 text-sm font-semibold text-slate-800"><input type="checkbox" required checked={p.terms} onChange={event=>p.setTerms(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-[#0B4E9B]"/>I agree to the estimated-time assumptions, selected scope and applicable service terms.</label>
     </div>
   </div>;
@@ -624,13 +537,13 @@ function ReviewStep(props:{
 function DesktopSummary(props:{
   mode:Mode;generalMinutes:Range;cleaners:number;generalPrice:Range;carpetSelected:boolean;
   carpetMinutes:Range;carpetPrice:number;subtotal:Range;gst:Range;total:Range;count:number;
-  manual:boolean;step:number;submitting:boolean;canSubmit:boolean;onContinue:()=>void;error:string;
+  manual:boolean;step:number;submitting:boolean;canSubmit:boolean;onContinue:()=>void;error:string;config:EstimatorConfig;
 }){
   const p=props;
   return <aside className="hidden h-fit rounded-xl bg-[#0B4E9B] p-6 text-white shadow-lg lg:sticky lg:top-24 lg:block">
     <h3 className="mb-4 border-b border-white/20 pb-4 text-xl font-bold">Your cleaning plan</h3>
     <div className="space-y-3 text-sm"><Row label="General cleaning labour" value={`~${durationRange(p.generalMinutes)}`}/><Row label={`On-site · ${p.cleaners} cleaners`} value={`~${durationRange({min:p.generalMinutes.min/p.cleaners,max:p.generalMinutes.max/p.cleaners})}`}/><Row label="Selected tasks" value={String(p.count)}/>{p.carpetSelected&&<Row label="Carpet steam" value={`~${durationRange(p.carpetMinutes)}`}/>}</div>
-    {p.mode==="price"&&!p.manual&&<div className="mt-5 space-y-3 border-t border-white/20 pt-4 text-sm"><Row label="General cleaning" value={moneyRange(p.generalPrice)}/>{p.carpetSelected&&<Row label="Carpet steam" value={money(p.carpetPrice)}/>}<Row label="Subtotal" value={moneyRange(p.subtotal)}/><Row label="GST (5%)" value={moneyRange(p.gst)}/><div className="rounded-lg border border-white/20 bg-white/10 p-4"><p className="text-xs text-blue-100">Estimated total</p><p className="mt-1 text-2xl font-extrabold">{moneyRange(p.total)}</p></div></div>}
+    {p.mode==="price"&&!p.manual&&<div className="mt-5 space-y-3 border-t border-white/20 pt-4 text-sm"><Row label="General cleaning" value={moneyRange(p.generalPrice)}/>{p.carpetSelected&&<Row label="Carpet steam" value={money(p.carpetPrice)}/>}<Row label="Subtotal" value={moneyRange(p.subtotal)}/>{p.config.gstEnabled&&<Row label={`GST (${p.config.gstRate*100}%)`} value={moneyRange(p.gst)}/>}<div className="rounded-lg border border-white/20 bg-white/10 p-4"><p className="text-xs text-blue-100">Estimated total</p><p className="mt-1 text-2xl font-extrabold">{moneyRange(p.total)}</p></div></div>}
     {p.manual&&<div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900"><AlertCircle className="mr-2 inline" size={18}/><strong className="text-sm">Assessment recommended</strong><p className="mt-1 text-xs">Selections stay saved while CAMZ confirms the affected item.</p></div>}
     {p.error&&<p role="alert" className="mt-4 rounded bg-red-50 p-3 text-sm text-red-700">{p.error}</p>}
     {p.step<STEPS.length?<button type="button" onClick={p.onContinue} className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#00B7EB] font-bold">Continue<ArrowRight size={18}/></button>:
@@ -638,22 +551,21 @@ function DesktopSummary(props:{
   </aside>;
 }
 
-function MobileSummary({mode,generalMinutes,total,step,disabled,canSubmit,submitting,onNext}:{mode:Mode;generalMinutes:Range;total:Range;step:number;disabled:boolean;canSubmit:boolean;submitting:boolean;onNext:()=>void}){
+function MobileSummary({mode,generalMinutes,total,manual,step,disabled,canSubmit,submitting,onNext}:{mode:Mode;generalMinutes:Range;total:Range;manual:boolean;step:number;disabled:boolean;canSubmit:boolean;submitting:boolean;onNext:()=>void}){
   return <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white p-3 shadow-[0_-6px_20px_rgba(15,23,42,0.12)] lg:hidden">
-    <div className="mx-auto flex max-w-lg items-center gap-3"><div className="min-w-0 flex-1"><p className="text-[11px] font-bold uppercase text-slate-500">Estimated cleaning</p><p className="truncate text-sm font-extrabold text-[#0B4E9B]">{durationRange(generalMinutes)}{mode==="price"?` · ${moneyRange(total)}`:""}</p></div>
+    <div className="mx-auto flex max-w-lg items-center gap-3"><div className="min-w-0 flex-1"><p className="text-[11px] font-bold uppercase text-slate-500">Estimated cleaning</p><p className="truncate text-sm font-extrabold text-[#0B4E9B]">{durationRange(generalMinutes)}{mode==="price"?manual?" · Review required":` · ${moneyRange(total)}`:""}</p></div>
       {step<STEPS.length?<button type="button" onClick={onNext} disabled={disabled} className="flex h-11 items-center gap-2 rounded-lg bg-[#00B7EB] px-5 text-sm font-bold text-white disabled:opacity-40">Next<ArrowRight size={17}/></button>:
         <button type="submit" form="cleaning-plan-form" disabled={submitting||!canSubmit} className="h-11 rounded-lg bg-[#00B7EB] px-5 text-sm font-bold text-white disabled:opacity-40">{submitting?"Submitting...":"Submit"}</button>}</div>
   </div>;
 }
 
-function PriceBox({generalPrice,carpetPrice,subtotal,gst,total,manual}:{generalPrice:Range;carpetPrice:number;subtotal:Range;gst:Range;total:Range;manual:boolean}){
-  if(manual)return <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900"><h3 className="font-bold">Assessment required for part of this plan</h3><p className="mt-2 text-sm">The calculable scope is saved, but CAMZ should confirm heavy, unusual or specialty work before the amount becomes final.</p></div>;
-  return <div className="rounded-xl bg-[#0B4E9B] p-5 text-white"><h3 className="mb-4 font-bold">Live price estimate</h3><div className="space-y-3 text-sm"><Row label="General cleaning" value={moneyRange(generalPrice)}/>{carpetPrice>0&&<Row label="Carpet steam cleaning" value={money(carpetPrice)}/>}<Row label="Estimated subtotal" value={moneyRange(subtotal)}/><Row label="GST (5%)" value={moneyRange(gst)}/><div className="border-t border-white/20 pt-3 text-lg"><Row label="Estimated total" value={moneyRange(total)}/></div></div><details className="mt-4 rounded-lg bg-white/10 p-3 text-xs"><summary className="cursor-pointer font-bold">How this is calculated</summary><p className="mt-2 leading-relaxed text-blue-100">The first 4 estimated man-hours are included in $179. Additional general labour uses 15-minute increments at $40/hour. Carpet steam cleaning is separate.</p></details></div>;
+function PriceBox({generalPrice,carpetPrice,subtotal,gst,total,manual,config,manualReasons}:{generalPrice:Range;carpetPrice:number;subtotal:Range;gst:Range;total:Range;manual:boolean;config:EstimatorConfig;manualReasons:string[]}){
+  return <div className="rounded-xl bg-[#0B4E9B] p-5 text-white"><h3 className="mb-4 font-bold">{manual?"Calculable estimate + assessment":"Live price estimate"}</h3><div className="space-y-3 text-sm"><Row label="General cleaning" value={moneyRange(generalPrice)}/>{carpetPrice>0&&<Row label="Carpet steam cleaning" value={money(carpetPrice)}/>}<Row label="Estimated subtotal" value={moneyRange(subtotal)}/>{config.gstEnabled&&<Row label={`GST (${config.gstRate*100}%)`} value={moneyRange(gst)}/>}<div className="border-t border-white/20 pt-3 text-lg"><Row label="Estimated total" value={moneyRange(total)}/></div></div>{manual&&<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><strong>Assessment required for affected scope:</strong><ul className="mt-1 list-disc pl-5">{manualReasons.map(reason=><li key={reason}>{reason}</li>)}</ul></div>}<details className="mt-4 rounded-lg bg-white/10 p-3 text-xs"><summary className="cursor-pointer font-bold">How this is calculated</summary><p className="mt-2 leading-relaxed text-blue-100">The first {duration(config.includedMinutes)} are included in {money(config.baseCents)}. Additional general labour uses {config.incrementMinutes}-minute increments at {money(config.extraHourCents)}/hour. Carpet steam cleaning is separate.</p></details></div>;
 }
 
-function BaseNotice({onDismiss}:{onDismiss:()=>void}){return <div className="fixed bottom-24 left-3 right-3 z-30 mx-auto max-w-xl rounded-xl border border-cyan-200 bg-white p-4 shadow-xl lg:bottom-5"><button type="button" aria-label="Dismiss" onClick={onDismiss} className="absolute right-3 top-3 text-slate-400"><X size={18}/></button><p className="pr-8 text-sm font-bold text-[#0B4E9B]">Your plan is using most of the included time.</p><p className="mt-1 text-xs leading-relaxed text-slate-600">Keep adding what matters. If additional time is likely, the estimate updates automatically and you can choose your budget approach at review.</p></div>}
+function BaseNotice({kind,message,onDismiss}:{kind:"near"|"exceeded";message:string;onDismiss:()=>void}){return <div className="fixed bottom-24 left-3 right-3 z-30 mx-auto max-w-xl rounded-xl border border-cyan-200 bg-white p-4 shadow-xl lg:bottom-5"><button type="button" aria-label="Dismiss" onClick={onDismiss} className="absolute right-3 top-3 text-slate-400"><X size={18}/></button><p className="pr-8 text-sm font-bold text-[#0B4E9B]">{kind==="near"?"Your plan is using most of the included time.":"Your plan includes additional cleaning time."}</p><p className="mt-1 text-xs leading-relaxed text-slate-600">{message}</p></div>}
 function ModeCard({icon,title,text,onClick}:{icon:ReactNode;title:string;text:string;onClick:()=>void}){return <button type="button" onClick={onClick} className="group rounded-2xl border-2 border-slate-200 p-6 text-left transition hover:border-[#00B7EB] hover:shadow-md"><span className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-[#0B4E9B] group-hover:bg-[#0B4E9B] group-hover:text-white">{icon}</span><span className="mt-5 block text-xl font-bold text-[#0B4E9B]">{title}</span><span className="mt-2 block text-sm leading-relaxed text-slate-600">{text}</span><span className="mt-5 flex items-center gap-2 text-sm font-bold text-[#00A8D4]">Start planning<ArrowRight size={17}/></span></button>}
-function Recommendation({onAdd}:{onAdd:()=>void}){return <div className="mb-5 flex flex-col gap-3 rounded-xl border border-cyan-200 bg-cyan-50 p-4 sm:flex-row sm:items-center"><Sparkles className="shrink-0 text-[#00A8D4]" size={22}/><div className="flex-1"><p className="text-sm font-bold text-[#0B4E9B]">Complete pet-hair detailing</p><p className="mt-1 text-xs text-slate-600">Add a property-level pet-hair allowance.</p></div><button type="button" onClick={onAdd} className="rounded-lg bg-[#0B4E9B] px-4 py-2 text-xs font-bold text-white">Add to plan</button></div>}
+function Recommendation({rule,onAdd,onDismiss}:{rule:EstimatorRecommendation;onAdd:()=>void;onDismiss:()=>void}){return <div className="relative flex flex-col gap-3 rounded-xl border border-cyan-200 bg-cyan-50 p-4 pr-11 sm:flex-row sm:items-center"><button type="button" aria-label={`Dismiss ${rule.title}`} onClick={onDismiss} className="absolute right-3 top-3 rounded p-1 text-slate-400 hover:bg-white"><X size={17}/></button><Sparkles className="shrink-0 text-[#00A8D4]" size={22}/><div className="flex-1"><p className="text-sm font-bold text-[#0B4E9B]">{rule.title}</p><p className="mt-1 text-xs text-slate-600">{rule.description}</p></div><button type="button" onClick={onAdd} className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0B4E9B] px-4 py-2 text-xs font-bold text-white"><Plus size={15}/>Add to plan</button></div>}
 function Selection({selected,title,text,onClick}:{selected:boolean;title:string;text:string;onClick:()=>void}){return <button type="button" aria-pressed={selected} onClick={onClick} className={`relative rounded-xl border-2 p-4 text-left ${selected?"border-[#0B4E9B] bg-blue-50":"border-slate-200"}`}>{selected&&<Check className="absolute right-3 top-3 text-[#0B4E9B]" size={18}/>}<strong className="block pr-6 text-sm">{title}</strong><span className="mt-2 block text-xs text-slate-600">{text}</span></button>}
 function Choice({label,options,value,onChange}:{label:string;options:(string[])[];value:string;onChange:(value:string)=>void}){return <div><h3 className="mb-3 text-sm font-bold">{label}</h3><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{options.map(([id,text,helper])=><button key={id} type="button" aria-pressed={value===id} onClick={()=>onChange(id)} className={`relative min-h-14 rounded-xl border-2 p-3 text-left ${value===id?"border-[#0B4E9B] bg-blue-50 text-[#0B4E9B]":"border-slate-200 text-slate-700 hover:border-[#00B7EB]"}`}><strong className="block pr-5 text-sm">{text}</strong>{helper&&<span className="mt-1 block text-xs font-normal text-slate-500">{helper}</span>}{value===id&&<Check className="absolute right-3 top-3" size={17}/>}</button>)}</div></div>}
 function Counter({value,onChange,min=0,max=20}:{value:number;onChange:(value:number)=>void;min?:number;max?:number}){return <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white"><button type="button" aria-label="Decrease" onClick={()=>onChange(clamp(value-1,min,max))} disabled={value<=min} className="flex h-10 w-10 items-center justify-center text-[#0B4E9B] disabled:opacity-30"><Minus size={17}/></button><span className="min-w-9 text-center text-sm font-bold">{value}</span><button type="button" aria-label="Increase" onClick={()=>onChange(clamp(value+1,min,max))} disabled={value>=max} className="flex h-10 w-10 items-center justify-center text-[#0B4E9B] disabled:opacity-30"><Plus size={17}/></button></div>}

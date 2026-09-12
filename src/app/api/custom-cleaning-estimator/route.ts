@@ -68,8 +68,12 @@ export async function POST(request: NextRequest) {
       halfBaths: Number(property.halfBaths) || 0,
       size: text(property.size, 30),
       basement: text(property.basement, 30),
-      condition: ["maintained", "attention", "heavy"].includes(property.condition) ? property.condition : "maintained",
+      condition: ["maintained", "attention", "heavy", "very_heavy"].includes(property.condition) ? property.condition : "maintained",
       cleaners: Number(property.cleaners) || 1,
+      clutter: text(property.clutter, 30),
+      excessiveClutter: property.excessiveClutter === true,
+      delicateWalls: property.delicateWalls === true,
+      unusualScope: property.unusualScope === true,
     },
     carpet: {
       enabled: checklist.carpet?.enabled === true,
@@ -81,7 +85,10 @@ export async function POST(request: NextRequest) {
       heavySoil: checklist.carpet?.heavySoil === true,
       petTreatment: checklist.carpet?.petTreatment === true,
     },
-    selected: checklist.selected_tasks.map((item: any) => ({ task_id: text(item?.task_id, 80), quantity: Number(item?.quantity) || 1 })),
+    selected: checklist.selected_tasks.map((item: any) => ({
+      task_id: text(item?.task_id, 80), quantity: Number(item?.quantity) || 1,
+      condition: ["maintained", "attention", "heavy", "very_heavy"].includes(item?.condition) ? item.condition : undefined,
+    })),
   }, config, tasks);
 
   if (!selectedTasks.length) {

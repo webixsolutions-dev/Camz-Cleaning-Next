@@ -7,6 +7,7 @@ interface BookingDetails {
   service_time: string;
   full_address: string;
   cleaning_type?: string;
+  area?: string;
 }
 
 export async function sendAssignmentEmail(
@@ -15,18 +16,16 @@ export async function sendAssignmentEmail(
   bookingDetails: BookingDetails
 ) {
   try {
-    // 1. Email bhejney wala (Transporter) setup
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT) || 465,
-      secure: true, // Port 465 ke liye hamesha true hota hai
+      secure: true, 
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
     });
 
-    // 2. Email ka design aur content
     const mailOptions = {
       from: `"Camz Cleaning" <${process.env.SMTP_USER}>`,
       to: cleanerEmail,
@@ -61,13 +60,63 @@ export async function sendAssignmentEmail(
       `,
     };
 
-    // 3. Email Send karna
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email successfully sent to ${cleanerEmail} (ID: ${info.messageId})`);
+    console.log(`✅ [EMAIL SUCCESS] Assignment email sent to ${cleanerEmail} (ID: ${info.messageId})`);
     return true;
 
   } catch (error) {
-    console.error("❌ Error sending email:", error);
+    console.error("❌ [EMAIL FAILED] Error sending assignment email:", error);
+    return false;
+  }
+}
+
+export async function sendCredentialsEmail(
+  userEmail: string, 
+  userName: string, 
+  userPass: string,
+  userRole: string
+) {
+  try {
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: true,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    // Formatting the role to look better (e.g., "data_entry" -> "Data Entry")
+    const formattedRole = userRole.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+    const mailOptions = {
+      from: `"Camz Cleaning" <${process.env.SMTP_USER}>`,
+      to: userEmail,
+      subject: `Welcome to Camz Cleaning - Your Account Details`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #0056b3;">Welcome, ${userName}!</h2>
+          <p style="color: #333; font-size: 16px;">An account has been created for you on the Camz Cleaning Portal as a <strong>${formattedRole}</strong>.</p>
+          
+          <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin-top: 15px;">
+            <p style="margin: 0 0 10px 0; font-size: 15px;"><strong>Your Login Details:</strong></p>
+            <p style="margin: 5px 0; font-size: 15px;"><strong>Email:</strong> ${userEmail}</p>
+            <p style="margin: 5px 0; font-size: 15px;"><strong>Password:</strong> ${userPass}</p>
+          </div>
+          
+          <p style="margin-top: 25px; color: #555; font-size: 14px;">Please log in and remember to change your password as soon as possible for security reasons.</p>
+          <p style="margin-top: 15px; font-size: 15px;">Best Regards,<br><strong style="color: #000;">Camz Cleaning Operations</strong></p>
+        </div>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ [EMAIL SUCCESS] Welcome email sent to ${userName} (${userEmail})`);
+    return true;
+
+  } catch (error) {
+    console.error("❌ [EMAIL FAILED] Error sending welcome email:", error);
     return false;
   }
 }
