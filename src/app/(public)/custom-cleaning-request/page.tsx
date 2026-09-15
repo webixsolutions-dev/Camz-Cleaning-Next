@@ -1,13 +1,13 @@
 "use client";
 
 import {
-  Dispatch, FormEvent, InputHTMLAttributes, ReactNode, SetStateAction,
+  Dispatch, FormEvent, InputHTMLAttributes, SetStateAction,
   useEffect, useMemo, useState,
 } from "react";
 import {
   AlertCircle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check,
-  CheckCircle2, ChevronDown, Clock3, DollarSign, Info, LoaderCircle,
-  MapPin, Minus, Plus, Sparkles, X,
+  CheckCircle2, ChevronDown, Download, Info, LoaderCircle,
+  MailCheck, MapPin, Minus, Plus, Sparkles, X,
 } from "lucide-react";
 import CommonHeroSection from "@/components/common/CommonHeroSection";
 import { createClient } from "@/lib/supabase/client";
@@ -83,11 +83,18 @@ const trackEstimatorEvent=(event:string,details:Record<string,unknown>={})=>{
   void fetch("/api/custom-cleaning-estimator/events",{method:"POST",headers:{"Content-Type":"application/json"},keepalive:true,body:JSON.stringify({session_id:sessionId,event_name:event.replace(/^camz_estimator_/,""),mode:details.mode,details})}).catch(()=>undefined);
 };
 
-export default function CustomCleaningRequestPage() {
+type Confirmation = {
+  reference: string;
+  filename: string;
+  pdfBase64: string;
+  emailSent: boolean;
+};
+
+export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
   const [CONFIG,setConfig]=useState<EstimatorConfig>(DEFAULT_ESTIMATOR_CONFIG);
   const [TASKS,setTasks]=useState<Task[]>(DEFAULT_ESTIMATOR_TASKS);
   const [recommendations,setRecommendations]=useState<EstimatorRecommendation[]>(DEFAULT_ESTIMATOR_RECOMMENDATIONS);
-  const [mode,setMode]=useState<Mode|null>(null);
+  const mode=lockedMode;
   const [step,setStep]=useState(1);
   const [property,setProperty]=useState<Property>({
     type:"",bedrooms:1,fullBaths:1,halfBaths:0,size:"900-1499",
@@ -116,7 +123,7 @@ export default function CustomCleaningRequestPage() {
   const [terms,setTerms]=useState(false);
   const [status,setStatus]=useState<"idle"|"submitting"|"success"|"error">("idle");
   const [errorMessage,setErrorMessage]=useState("");
-  const [reference,setReference]=useState("");
+  const [confirmation,setConfirmation]=useState<Confirmation|null>(null);
   useEffect(()=>{
     let active=true;
     fetch("/api/custom-cleaning-estimator",{headers:{Accept:"application/json"}})
@@ -262,14 +269,34 @@ export default function CustomCleaningRequestPage() {
       preferred_contact:form.get("preferred_contact"),preferred_date:form.get("preferred_date"),
       status:"new",mode,budget,
     };
-    const response=await fetch("/api/custom-cleaning-estimator",{
+    const endpoint=mode==="price"
+      ? "/api/custom-cleaning-estimator/checklist-with-price"
+      : "/api/custom-cleaning-estimator/checklist-only";
+    const response=await fetch(endpoint,{
       method:"POST",headers:{"Content-Type":"application/json",Accept:"application/json"},body:JSON.stringify(payload),
     });
     const result=await response.json().catch(()=>({}));
     if(!response.ok){setStatus("error");setErrorMessage(result.error||"We could not submit your cleaning plan. Please try again.");return;}
     trackEstimatorEvent("camz_estimator_submitted",{mode,budget,requires_manual_quote:manual,selected_task_count:selectedTasks.length});
-    setReference(result.reference||requestId.slice(0,8).toUpperCase());setStatus("success");
+    setConfirmation({
+      reference:result.reference||`CCR-${requestId.slice(0,8).toUpperCase()}`,
+      filename:result.pdf_filename||`CAMZ-Cleaning-Plan-${requestId.slice(0,8).toUpperCase()}.pdf`,
+      pdfBase64:result.pdf_base64||"",
+      emailSent:result.email_sent===true,
+    });
+    setStatus("success");
     window.scrollTo({top:0,behavior:"smooth"});
+  };
+
+  const downloadConfirmation=()=>{
+    if(!confirmation?.pdfBase64)return;
+    const binary=window.atob(confirmation.pdfBase64);
+    const bytes=new Uint8Array(binary.length);
+    for(let index=0;index<binary.length;index+=1)bytes[index]=binary.charCodeAt(index);
+    const url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
+    const link=document.createElement("a");
+    link.href=url;link.download=confirmation.filename;document.body.appendChild(link);link.click();link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const taskGroups=(phase:Phase)=>(
@@ -316,9 +343,15 @@ export default function CustomCleaningRequestPage() {
       <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><CheckCircle2 size={34}/></div>
       <p className="mb-3 text-sm font-bold uppercase text-[#4276B2]">Cleaning plan received</p>
       <h2 className="text-3xl font-bold text-[#0B4E9B] sm:text-4xl">Thank you. Your selections are saved.</h2>
-      <p className="mt-3 text-sm font-semibold text-slate-500">Reference CAMZ-{reference}</p>
+      <p className="mt-3 text-sm font-semibold text-slate-500">Reference {confirmation?.reference}</p>
       <p className="mx-auto mt-4 max-w-md text-slate-600">{manual||mode==="time"?"Our team will review your scope and contact you with the next step.":"Your estimated scope, time and price were submitted successfully."}</p>
-      <button type="button" onClick={()=>window.location.reload()} className="mt-8 rounded-lg bg-[#0B4E9B] px-6 py-3 font-semibold text-white hover:bg-[#00A8D4]">Build another plan</button>
+      <div className={`mx-auto mt-5 flex max-w-md items-start gap-3 rounded-xl border p-4 text-left text-sm ${confirmation?.emailSent?"border-emerald-200 bg-emerald-50 text-emerald-800":"border-amber-200 bg-amber-50 text-amber-900"}`}>
+        <MailCheck className="mt-0.5 shrink-0" size={19}/><p>{confirmation?.emailSent?"A confirmation email with your PDF has been sent to your email address.":"Your request is saved, but the confirmation email could not be delivered. Please download your PDF below."}</p>
+      </div>
+      <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+        {confirmation?.pdfBase64&&<button type="button" onClick={downloadConfirmation} className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#00A8D4] px-6 py-3 font-semibold text-white hover:bg-[#0098BF]"><Download size={18}/>Download PDF</button>}
+        <button type="button" onClick={()=>window.location.reload()} className="rounded-lg bg-[#0B4E9B] px-6 py-3 font-semibold text-white hover:bg-[#00A8D4]">Build another plan</button>
+      </div>
     </div>
   </main>;
 
@@ -326,17 +359,7 @@ export default function CustomCleaningRequestPage() {
     <div className="min-w-0 max-w-full overflow-hidden [&_h1]:!mx-auto [&_h1]:!w-full [&_h1]:!max-w-[18ch] [&_h1]:!whitespace-normal [&_h1]:!break-words [&_h1]:!px-4 [&_h1]:!text-center [&_h1]:!text-[clamp(1.5rem,6vw,2rem)] [&_h1]:!leading-[1.15] sm:[&_h1]:!text-5xl lg:[&_h1]:!text-6xl">
       <CommonHeroSection backgroundImage="/p4.webp" title="Build Your Cleaning Plan"/>
     </div>
-    {!mode?<main className="bg-[#F4F8FC] px-3 py-10 sm:px-6 sm:py-16">
-      <section className="mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-10">
-        <p className="text-sm font-bold uppercase tracking-wide text-[#4276B2]">CAMZ Cleaning estimator</p>
-        <h2 className="mt-2 text-2xl font-bold text-[#0B4E9B] sm:text-4xl">How would you like to plan your cleaning?</h2>
-        <p className="mt-3 max-w-2xl text-slate-600">Both choices use the same checklist and labour-time engine. You can switch later without losing selections.</p>
-        <div className="mt-8 grid gap-4 md:grid-cols-2">
-          {CONFIG.timeModeEnabled&&<ModeCard icon={<Clock3 size={28}/>} title="Build My Plan" text="Choose rooms and tasks, then see estimated cleaning time. No price is shown." onClick={()=>{trackEstimatorEvent("camz_estimator_mode_selected",{mode:"time"});setMode("time");}}/>} 
-          {CONFIG.priceModeEnabled&&<ModeCard icon={<DollarSign size={28}/>} title="See Time & Price" text="See estimated time, live price range, carpet subtotal and GST." onClick={()=>{trackEstimatorEvent("camz_estimator_mode_selected",{mode:"price"});setMode("price");}}/>} 
-        </div>
-      </section>
-    </main>:<>
+    <>
       <Progress step={step}/>
       <main className="max-w-full overflow-x-hidden bg-[#F4F8FC] pb-36 pt-4 sm:pt-6 lg:pb-20">
         <form id="cleaning-plan-form" onSubmit={handleSubmit} className="px-3 py-4 sm:px-6 lg:px-8">
@@ -346,16 +369,13 @@ export default function CustomCleaningRequestPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div><p className="text-sm font-bold uppercase text-[#4276B2]">Step {step} of {STEPS.length}</p>
                     <h2 className="mt-2 text-2xl font-bold text-[#0B4E9B] sm:text-3xl">{STEPS[step-1]}</h2></div>
-                  {((mode==="time"&&CONFIG.priceModeEnabled)||(mode==="price"&&CONFIG.timeModeEnabled))&&<button type="button" onClick={()=>{const nextMode=mode==="time"?"price":"time";trackEstimatorEvent("camz_estimator_mode_switched",{from:mode,to:nextMode});setMode(nextMode);}}
-                    className="rounded-full border border-[#0B4E9B] px-4 py-2 text-xs font-bold text-[#0B4E9B] hover:bg-blue-50">
-                    {mode==="time"?"Show time & price":"Switch to time only"}
-                  </button>}
+                  <span className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-[#0B4E9B]">{mode==="price"?"Checklist with price":"Checklist without price"}</span>
                 </div>
 
                 {step===1&&<div className="mt-8 space-y-8">
                   <Choice label="Property type" value={property.type} onChange={value=>setProperty(current=>({...current,type:value as Property["type"]}))}
                     options={[["house","House"],["townhouse","Townhouse"],["condo","Condo"],["apartment","Apartment"]]}/>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <CounterField label="Bedrooms" value={property.bedrooms} max={12} onChange={value=>setProperty(current=>({...current,bedrooms:value}))}/>
                     <CounterField label="Full bathrooms" value={property.fullBaths} max={10} onChange={value=>setProperty(current=>({...current,fullBaths:value}))}/>
                     <CounterField label="Half baths" value={property.halfBaths} max={10} onChange={value=>setProperty(current=>({...current,halfBaths:value}))}/>
@@ -384,8 +404,8 @@ export default function CustomCleaningRequestPage() {
                   <div className="mb-5 space-y-3">{recommendations.filter(recommendationApplies).map(rule=><Recommendation key={rule.id} rule={rule} onAdd={()=>addRecommendation(rule)} onDismiss={()=>{setDismissedRecommendations(current=>[...current,rule.id]);trackEstimatorEvent("camz_estimator_recommendation_dismissed",{mode,rule_id:rule.id});}}/>)}</div>
                   {taskGroups("detail")}
                 </div>}
-                {step===4&&<CarpetStep carpet={carpet} setCarpet={setCarpet} disclaimer={CONFIG.carpetDisclaimer} stairStepCap={CONFIG.carpetStairStepCap||14}/>} 
-                {step===5&&<SummaryStep mode={mode} setMode={setMode} priceModeEnabled={CONFIG.priceModeEnabled} shownMinutes={shownMinutes} cleaners={property.cleaners}
+                {step===4&&<CarpetStep mode={mode} carpet={carpet} setCarpet={setCarpet} disclaimer={CONFIG.carpetDisclaimer} stairStepCap={CONFIG.carpetStairStepCap||14}/>} 
+                {step===5&&<SummaryStep mode={mode} shownMinutes={shownMinutes} cleaners={property.cleaners}
                   carpetSelected={carpetSelected} carpetMinutes={carpetMinutes} generalPrice={generalPrice} carpetPrice={carpetPrice}
                   subtotal={subtotal} gst={gst} total={total} manual={manual} actualMinutes={actualMinutes}
                   budget={budget} setBudget={value=>{trackEstimatorEvent("camz_estimator_budget_selected",{mode,budget:value});setBudget(value);}} selectedCategories={selectedCategories} selectedTasks={selectedTasks} config={CONFIG} manualReasons={manualReasons}/>} 
@@ -413,8 +433,12 @@ export default function CustomCleaningRequestPage() {
       {noticeState&&!dismissedNotices.includes(noticeState)&&<BaseNotice kind={noticeState} message={noticeState==="near"?CONFIG.nearIncludedMessage:CONFIG.exceededIncludedMessage} onDismiss={()=>setDismissedNotices(current=>[...current,noticeState])}/>} 
       <MobileSummary mode={mode} generalMinutes={shownMinutes} total={total} manual={manual} step={step}
         disabled={step===1&&!property.type} canSubmit={terms&&selectedTasks.length>0} submitting={status==="submitting"} onNext={next}/>
-    </>}
+    </>
   </>;
+}
+
+export default function CustomCleaningRequestPage(){
+  return <CustomCleaningRequestForm lockedMode="price"/>;
 }
 
 function Progress({step}:{step:number}){
@@ -432,12 +456,12 @@ function Progress({step}:{step:number}){
   </div>;
 }
 
-function CarpetStep({carpet,setCarpet,disclaimer,stairStepCap}:{carpet:Carpet;setCarpet:Dispatch<SetStateAction<Carpet>>;disclaimer:string;stairStepCap:number}){
+function CarpetStep({mode,carpet,setCarpet,disclaimer,stairStepCap}:{mode:Mode;carpet:Carpet;setCarpet:Dispatch<SetStateAction<Carpet>>;disclaimer:string;stairStepCap:number}){
   return <div className="mt-8 space-y-6">
     <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-[#0B4E9B]"><Info className="mr-2 inline" size={18}/><strong>Carpet vacuuming</strong> stays in general cleaning labour. Steam cleaning is calculated separately.</div>
     <label className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-5 ${carpet.enabled?"border-[#0B4E9B] bg-blue-50":"border-slate-200"}`}>
       <input type="checkbox" checked={carpet.enabled} onChange={event=>setCarpet(current=>({...current,enabled:event.target.checked}))} className="mt-1 h-5 w-5 accent-[#0B4E9B]"/>
-      <span><strong className="block text-slate-900">Add professional carpet steam cleaning</strong><span className="mt-1 block text-sm text-slate-600">Separate specialty time and price calculator.</span></span>
+      <span><strong className="block text-slate-900">Add professional carpet steam cleaning</strong><span className="mt-1 block text-sm text-slate-600">{mode==="price"?"Separate specialty time and price calculator.":"Separate specialty-service time estimate."}</span></span>
     </label>
     {carpet.enabled&&<div className="space-y-5 rounded-xl border border-slate-200 p-4 sm:p-6">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -457,12 +481,12 @@ function CarpetStep({carpet,setCarpet,disclaimer,stairStepCap}:{carpet:Carpet;se
 }
 
 function SummaryStep(props:{
-  mode:Mode;setMode:(mode:Mode)=>void;priceModeEnabled:boolean;shownMinutes:Range;cleaners:number;carpetSelected:boolean;
+  mode:Mode;shownMinutes:Range;cleaners:number;carpetSelected:boolean;
   carpetMinutes:Range;generalPrice:Range;carpetPrice:number;subtotal:Range;gst:Range;total:Range;
   manual:boolean;actualMinutes:Range;budget:"fixed"|"extend";setBudget:(value:"fixed"|"extend")=>void;
   selectedCategories:{id:Category;label:string}[];selectedTasks:Task[];config:EstimatorConfig;manualReasons:string[];
 }){
-  const {mode,setMode,priceModeEnabled,shownMinutes,cleaners,carpetSelected,carpetMinutes,generalPrice,carpetPrice,
+  const {mode,shownMinutes,cleaners,carpetSelected,carpetMinutes,generalPrice,carpetPrice,
     subtotal,gst,total,manual,actualMinutes,budget,setBudget,selectedCategories,selectedTasks,config,manualReasons}=props;
   return <div className="mt-8 space-y-6">
     <div className="grid gap-4 sm:grid-cols-2">
@@ -471,8 +495,7 @@ function SummaryStep(props:{
       {carpetSelected&&<Metric label="Carpet steam service" value={durationRange(carpetMinutes)}/>}
     </div>
     {mode==="price"?<PriceBox generalPrice={generalPrice} carpetPrice={carpetPrice} subtotal={subtotal} gst={gst} total={total} manual={manual} config={config} manualReasons={manualReasons}/>:<div className="rounded-xl border border-cyan-200 bg-cyan-50 p-5">
-      <h3 className="font-bold text-[#0B4E9B]">Want a price too?</h3><p className="mt-1 text-sm text-slate-600">Switch without losing any selections.</p>
-      {priceModeEnabled&&<button type="button" onClick={()=>setMode("price")} className="mt-4 rounded-lg bg-[#0B4E9B] px-5 py-3 text-sm font-bold text-white">Show my estimated price</button>}
+      <h3 className="font-bold text-[#0B4E9B]">Time-only checklist</h3><p className="mt-1 text-sm text-slate-600">This private link intentionally excludes all prices and GST.</p>
     </div>}
     {actualMinutes.max>config.includedMinutes&&<div><h3 className="mb-3 font-bold">Choose your time and budget approach</h3>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -564,12 +587,11 @@ function PriceBox({generalPrice,carpetPrice,subtotal,gst,total,manual,config,man
 }
 
 function BaseNotice({kind,message,onDismiss}:{kind:"near"|"exceeded";message:string;onDismiss:()=>void}){return <div className="fixed bottom-24 left-3 right-3 z-30 mx-auto max-w-xl rounded-xl border border-cyan-200 bg-white p-4 shadow-xl lg:bottom-5"><button type="button" aria-label="Dismiss" onClick={onDismiss} className="absolute right-3 top-3 text-slate-400"><X size={18}/></button><p className="pr-8 text-sm font-bold text-[#0B4E9B]">{kind==="near"?"Your plan is using most of the included time.":"Your plan includes additional cleaning time."}</p><p className="mt-1 text-xs leading-relaxed text-slate-600">{message}</p></div>}
-function ModeCard({icon,title,text,onClick}:{icon:ReactNode;title:string;text:string;onClick:()=>void}){return <button type="button" onClick={onClick} className="group rounded-2xl border-2 border-slate-200 p-6 text-left transition hover:border-[#00B7EB] hover:shadow-md"><span className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-[#0B4E9B] group-hover:bg-[#0B4E9B] group-hover:text-white">{icon}</span><span className="mt-5 block text-xl font-bold text-[#0B4E9B]">{title}</span><span className="mt-2 block text-sm leading-relaxed text-slate-600">{text}</span><span className="mt-5 flex items-center gap-2 text-sm font-bold text-[#00A8D4]">Start planning<ArrowRight size={17}/></span></button>}
 function Recommendation({rule,onAdd,onDismiss}:{rule:EstimatorRecommendation;onAdd:()=>void;onDismiss:()=>void}){return <div className="relative flex flex-col gap-3 rounded-xl border border-cyan-200 bg-cyan-50 p-4 pr-11 sm:flex-row sm:items-center"><button type="button" aria-label={`Dismiss ${rule.title}`} onClick={onDismiss} className="absolute right-3 top-3 rounded p-1 text-slate-400 hover:bg-white"><X size={17}/></button><Sparkles className="shrink-0 text-[#00A8D4]" size={22}/><div className="flex-1"><p className="text-sm font-bold text-[#0B4E9B]">{rule.title}</p><p className="mt-1 text-xs text-slate-600">{rule.description}</p></div><button type="button" onClick={onAdd} className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0B4E9B] px-4 py-2 text-xs font-bold text-white"><Plus size={15}/>Add to plan</button></div>}
 function Selection({selected,title,text,onClick}:{selected:boolean;title:string;text:string;onClick:()=>void}){return <button type="button" aria-pressed={selected} onClick={onClick} className={`relative rounded-xl border-2 p-4 text-left ${selected?"border-[#0B4E9B] bg-blue-50":"border-slate-200"}`}>{selected&&<Check className="absolute right-3 top-3 text-[#0B4E9B]" size={18}/>}<strong className="block pr-6 text-sm">{title}</strong><span className="mt-2 block text-xs text-slate-600">{text}</span></button>}
 function Choice({label,options,value,onChange}:{label:string;options:(string[])[];value:string;onChange:(value:string)=>void}){return <div><h3 className="mb-3 text-sm font-bold">{label}</h3><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{options.map(([id,text,helper])=><button key={id} type="button" aria-pressed={value===id} onClick={()=>onChange(id)} className={`relative min-h-14 rounded-xl border-2 p-3 text-left ${value===id?"border-[#0B4E9B] bg-blue-50 text-[#0B4E9B]":"border-slate-200 text-slate-700 hover:border-[#00B7EB]"}`}><strong className="block pr-5 text-sm">{text}</strong>{helper&&<span className="mt-1 block text-xs font-normal text-slate-500">{helper}</span>}{value===id&&<Check className="absolute right-3 top-3" size={17}/>}</button>)}</div></div>}
-function Counter({value,onChange,min=0,max=20}:{value:number;onChange:(value:number)=>void;min?:number;max?:number}){return <div className="inline-flex shrink-0 items-center overflow-hidden rounded-lg border border-slate-300 bg-white"><button type="button" aria-label="Decrease" onClick={()=>onChange(clamp(value-1,min,max))} disabled={value<=min} className="flex h-10 w-10 min-w-10 shrink-0 items-center justify-center text-[#0B4E9B] disabled:opacity-30"><Minus size={17}/></button><span className="min-w-9 shrink-0 text-center text-sm font-bold">{value}</span><button type="button" aria-label="Increase" onClick={()=>onChange(clamp(value+1,min,max))} disabled={value>=max} className="flex h-10 w-10 min-w-10 shrink-0 items-center justify-center text-[#0B4E9B] disabled:opacity-30"><Plus size={17}/></button></div>}
-function CounterField({label,value,onChange,min=0,max=20}:{label:string;value:number;onChange:(value:number)=>void;min?:number;max?:number}){return <div className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 p-4"><strong className="min-w-0 text-sm">{label}</strong><Counter value={value} onChange={onChange} min={min} max={max}/></div>}
+function Counter({value,onChange,min=0,max=20}:{value:number;onChange:(value:number)=>void;min?:number;max?:number}){return <div className="inline-grid w-[108px] shrink-0 grid-cols-[36px_36px_36px] items-center overflow-hidden rounded-lg border border-slate-300 bg-white"><button type="button" aria-label="Decrease" onClick={()=>onChange(clamp(value-1,min,max))} disabled={value<=min} className="flex h-10 w-9 items-center justify-center text-[#0B4E9B] disabled:opacity-30"><Minus size={17}/></button><span className="w-9 text-center text-sm font-bold">{value}</span><button type="button" aria-label="Increase" onClick={()=>onChange(clamp(value+1,min,max))} disabled={value>=max} className="flex h-10 w-9 items-center justify-center text-[#0B4E9B] disabled:opacity-30"><Plus size={17}/></button></div>}
+function CounterField({label,value,onChange,min=0,max=20}:{label:string;value:number;onChange:(value:number)=>void;min?:number;max?:number}){return <div className="flex min-h-[118px] min-w-0 flex-col justify-between gap-3 rounded-xl border border-slate-200 p-4"><strong className="block w-full break-words text-sm leading-snug text-slate-900">{label}</strong><div className="self-end"><Counter value={value} onChange={onChange} min={min} max={max}/></div></div>}
 function CheckRow({checked,onChange,title,text}:{checked:boolean;onChange:(value:boolean)=>void;title:string;text:string}){return <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={checked} onChange={event=>onChange(event.target.checked)} className="mt-1 h-5 w-5 accent-[#0B4E9B]"/><span><strong>{title}</strong><span className="block text-xs text-slate-500">{text}</span></span></label>}
 function Metric({label,value}:{label:string;value:string}){return <div className="rounded-xl border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-xl font-extrabold text-[#0B4E9B]">{value}</p></div>}
 function Field({label,name,...props}:{label:string;name:string}&InputHTMLAttributes<HTMLInputElement>){return <div><label htmlFor={name} className="mb-2 block text-sm font-semibold">{label}{props.required&&" *"}</label><input id={name} name={name} className={inputClass} {...props}/></div>}

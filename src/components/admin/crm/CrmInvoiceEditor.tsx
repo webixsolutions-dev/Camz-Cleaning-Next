@@ -1,30 +1,37 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Ban,
-  Bell,
   CheckCircle2,
-  FileText,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Eye,
   Mail,
   Plus,
   Receipt,
   RotateCcw,
   Send,
   ShieldAlert,
+  StickyNote,
   Wallet,
   X,
 } from "lucide-react";
 import { isDeliverableEmail } from "@/lib/crm/emailAddress";
-import { centsToDollars, dollarsToCents, formatCad, invoiceMoneyFromItems } from "@/lib/crm/services/invoiceCalc";
+import { calculateInvoiceTotals, centsToDollars, dollarsToCents, formatCad, type InvoiceDiscountType } from "@/lib/crm/services/invoiceCalc";
 import type { CrmCustomer } from "./CrmCustomersClient";
+import CrmReminderPanel from "./CrmReminderPanel";
 
 type Line = {
   id?: string;
   description: string;
+  details: string;
   quantity: string;
+  unit_label: string;
   unit_dollars: string;
+  taxable: boolean;
 };
 
 type Invoice = {
@@ -32,8 +39,18 @@ type Invoice = {
   invoice_number: string | null;
   status: string;
   customer_id: string;
+  billing_address_id: string | null;
+  service_address_id: string | null;
+  invoice_date: string | null;
+  service_date: string | null;
   due_date: string | null;
   notes: string | null;
+  discount_type: InvoiceDiscountType;
+  discount_value: number;
+  discount_cents: number;
+  discount_reason: string | null;
+  tax_enabled: boolean;
+  tax_rate_bps: number;
   tax_cents: number;
   subtotal_cents: number;
   total_cents: number;
@@ -44,8 +61,11 @@ type Invoice = {
   crm_invoice_items?: Array<{
     id: string;
     description: string;
+    details?: string | null;
     quantity: number;
+    unit_label?: string | null;
     unit_cents: number;
+    taxable?: boolean;
   }>;
   crm_payments?: Array<{
     id: string;
@@ -67,6 +87,20 @@ type Invoice = {
     error: string | null;
     created_at: string;
   }>;
+  crm_invoice_internal_notes?: Array<{
+    id: string;
+    note: string;
+    created_at: string;
+    edited_at?: string | null;
+  }>;
+};
+
+type CrmSettings = {
+  default_due_days?: number;
+  default_customer_note?: string | null;
+  default_tax_enabled?: boolean;
+  default_tax_bps?: number;
+  tax_number?: string | null;
 };
 
 type Notice = {
@@ -96,21 +130,53 @@ function formatStatus(status?: string | null) {
   return String(status || "draft").replaceAll("_", " ");
 }
 
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseDiscountReason(value?: string | null) {
+  const raw = String(value || "");
+  if (raw.startsWith("public:")) return { text: raw.slice(7), show: true };
+  if (raw.startsWith("internal:")) return { text: raw.slice(9), show: false };
+  return { text: raw, show: false };
+}
+
+const blankLine = (): Line => ({
+  description: "",
+  details: "",
+  quantity: "1",
+  unit_label: "service",
+  unit_dollars: "0.00",
+  taxable: true,
+});
+
 export default function CrmInvoiceEditor({
   invoiceId,
+  initialCustomerId,
   isAdmin,
 }: {
   invoiceId?: string;
+  initialCustomerId?: string;
   isAdmin: boolean;
 }) {
   const router = useRouter();
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [customerId, setCustomerId] = useState("");
-  const [dueDate, setDueDate] = useState("");
+  const [billingAddressId, setBillingAddressId] = useState("");
+  const [serviceAddressId, setServiceAddressId] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(today());
+  const [serviceDate, setServiceDate] = useState("");
+  const [dueDate, setDueDate] = useState(today());
   const [notes, setNotes] = useState("");
-  const [taxDollars, setTaxDollars] = useState("0.00");
-  const [lines, setLines] = useState<Line[]>([{ description: "", quantity: "1", unit_dollars: "0.00" }]);
+  const [discountType, setDiscountType] = useState<InvoiceDiscountType>("none");
+  const [discountValue, setDiscountValue] = useState("0");
+  const [discountReason, setDiscountReason] = useState("");
+  const [showDiscountReason, setShowDiscountReason] = useState(false);
+  const [taxEnabled, setTaxEnabled] = useState(true);
+  const [taxRatePercent, setTaxRatePercent] = useState("5");
+  const [lines, setLines] = useState<Line[]>([blankLine()]);
+  const [settings, setSettings] = useState<CrmSettings>({});
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [saving, setSaving] = useState(false);
@@ -122,10 +188,38 @@ export default function CrmInvoiceEditor({
   const [sendEmail, setSendEmail] = useState("");
   const [reverseTarget, setReverseTarget] = useState<{ id: string; amount_cents: number } | null>(null);
   const [reverseReason, setReverseReason] = useState("");
+  const [internalNote, setInternalNote] = useState("");
+  const [saveState, setSaveState] = useState<"saved" | "unsaved" | "saving">("saved");
+  const [duplicateInvoices, setDuplicateInvoices] = useState<Array<{ id: string; invoice_number: string | null; invoice_date: string; total_cents: number }>>([]);
+  const lastSavedFingerprint = useRef("");
 
   const draft = !invoice || invoice.status === "draft";
   const issued = Boolean(invoice && invoice.status !== "draft" && !invoice.is_void);
   const selectedCustomer = customers.find((row) => row.id === customerId);
+
+  const updateLine = (index: number, patch: Partial<Line>) => {
+    setLines((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+  };
+
+  const moveLine = (index: number, direction: -1 | 1) => {
+    setLines((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
+  const chooseCustomer = (nextId: string, source = customers) => {
+    const nextCustomer = source.find((row) => row.id === nextId);
+    const addresses = nextCustomer?.crm_customer_addresses || [];
+    setCustomerId(nextId);
+    setBillingAddressId(addresses.find((address) => address.is_billing)?.id || "");
+    setServiceAddressId(addresses.find((address) => address.is_service)?.id || "");
+    const nextEmail = nextCustomer?.email || "";
+    setSendEmail(isDeliverableEmail(nextEmail) ? nextEmail : "");
+  };
 
   const showNotice = (next: Notice) => {
     setNotice(next);
@@ -133,8 +227,9 @@ export default function CrmInvoiceEditor({
 
   const load = async (id?: string) => {
     try {
-      const [customersRes, invoiceRes] = await Promise.all([
+      const [customersRes, settingsRes, invoiceRes] = await Promise.all([
         fetch("/api/admin/crm/customers/", { cache: "no-store" }),
+        fetch("/api/admin/crm/settings/", { cache: "no-store" }),
         id ? fetch(`/api/admin/crm/invoices/?id=${id}`, { cache: "no-store" }) : Promise.resolve(null),
       ]);
       const customersPayload = await readApi(customersRes);
@@ -142,7 +237,26 @@ export default function CrmInvoiceEditor({
         setError(String(customersPayload.error || "Failed to load customers"));
         return;
       }
-      setCustomers((customersPayload.customers as CrmCustomer[]) || []);
+      const loadedCustomers = (customersPayload.customers as CrmCustomer[]) || [];
+      setCustomers(loadedCustomers);
+      if (!id && initialCustomerId && loadedCustomers.some((row) => row.id === initialCustomerId)) {
+        chooseCustomer(initialCustomerId, loadedCustomers);
+      }
+      const settingsPayload = await readApi(settingsRes);
+      if (settingsRes.ok) {
+        const nextSettings = (settingsPayload.settings || {}) as CrmSettings;
+        setSettings(nextSettings);
+        if (!id) {
+          const nextInvoiceDate = today();
+          const due = new Date(`${nextInvoiceDate}T12:00:00Z`);
+          due.setUTCDate(due.getUTCDate() + Number(nextSettings.default_due_days || 0));
+          setInvoiceDate(nextInvoiceDate);
+          setDueDate(due.toISOString().slice(0, 10));
+          setNotes(nextSettings.default_customer_note || "");
+          setTaxEnabled(nextSettings.default_tax_enabled !== false);
+          setTaxRatePercent(String(Number(nextSettings.default_tax_bps || 0) / 100));
+        }
+      }
 
       if (invoiceRes) {
         const payload = await readApi(invoiceRes);
@@ -157,9 +271,19 @@ export default function CrmInvoiceEditor({
         }
         setInvoice(current);
         setCustomerId(current.customer_id);
+        setBillingAddressId(current.billing_address_id || "");
+        setServiceAddressId(current.service_address_id || "");
+        setInvoiceDate(current.invoice_date || today());
+        setServiceDate(current.service_date || "");
         setDueDate(current.due_date || "");
         setNotes(current.notes || "");
-        setTaxDollars(centsToDollars(current.tax_cents));
+        setDiscountType(current.discount_type || "none");
+        setDiscountValue(String(current.discount_value || 0));
+        const parsedReason = parseDiscountReason(current.discount_reason);
+        setDiscountReason(parsedReason.text);
+        setShowDiscountReason(parsedReason.show);
+        setTaxEnabled(current.tax_enabled !== false);
+        setTaxRatePercent(String(Number(current.tax_rate_bps || 0) / 100));
         const customerEmail = current.crm_customers?.email || "";
         setSendEmail(isDeliverableEmail(customerEmail) ? customerEmail : sendEmail);
         if (!paymentAmount && current.balance_cents > 0) {
@@ -171,13 +295,17 @@ export default function CrmInvoiceEditor({
             ? invoiceItems.map((item) => ({
                 id: item.id,
                 description: item.description,
+                details: item.details || "",
                 quantity: String(item.quantity),
+                unit_label: item.unit_label || "service",
                 unit_dollars: centsToDollars(item.unit_cents),
+                taxable: item.taxable !== false,
               }))
-            : [{ description: "", quantity: "1", unit_dollars: "0.00" }],
+            : [blankLine()],
         );
       }
       setError("");
+      setSaveState("saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load invoice");
     }
@@ -186,7 +314,7 @@ export default function CrmInvoiceEditor({
   useEffect(() => {
     void load(invoiceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoiceId]);
+  }, [invoiceId, initialCustomerId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -196,18 +324,31 @@ export default function CrmInvoiceEditor({
 
   const saveDraft = async (options?: { silent?: boolean }) => {
     setSaving(true);
+    setSaveState("saving");
     setError("");
     try {
       const payload = {
         customer_id: customerId,
+        billing_address_id: billingAddressId || null,
+        service_address_id: serviceAddressId || null,
+        invoice_date: invoiceDate,
+        service_date: serviceDate || null,
         due_date: dueDate || null,
         notes,
-        tax_dollars: taxDollars,
+        discount_type: discountType,
+        discount_value: Number(discountValue || 0),
+        discount_reason: discountReason,
+        show_discount_reason: showDiscountReason,
+        tax_enabled: taxEnabled,
+        tax_rate_bps: Math.max(0, Math.round(Number(taxRatePercent || 0) * 100)),
         items: lines.map((line) => ({
           id: line.id,
           description: line.description,
-          quantity: Number(line.quantity || 1),
+          details: line.details,
+          quantity: Number(line.quantity || 0),
+          unit_label: line.unit_label,
           unit_dollars: line.unit_dollars,
+          taxable: line.taxable,
         })),
       };
       const response = await fetch("/api/admin/crm/invoices/", {
@@ -221,6 +362,8 @@ export default function CrmInvoiceEditor({
         return null;
       }
       const saved = body.invoice as Invoice;
+      lastSavedFingerprint.current = JSON.stringify(payload);
+      setSaveState("saved");
       if (!options?.silent) {
         showNotice({ kind: "success", title: "Draft saved", detail: "Line items and totals are stored. Issue when the bill is ready." });
       }
@@ -233,13 +376,14 @@ export default function CrmInvoiceEditor({
       return saved?.id || invoice?.id || null;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save invoice");
+      setSaveState("unsaved");
       return null;
     } finally {
       setSaving(false);
     }
   };
 
-  const runAction = async (action: "issue" | "send" | "remind" | "void") => {
+  const runAction = async (action: "issue" | "send" | "remind" | "void", confirmDuplicate = false) => {
     setError("");
 
     if (action === "void") {
@@ -290,9 +434,10 @@ export default function CrmInvoiceEditor({
         return;
       }
 
-      const payload: Record<string, string> = { id, action };
+      const payload: Record<string, string | boolean> = { id, action };
       if (action === "send" || action === "remind") payload.to_email = sendEmail.trim();
       if (action === "void") payload.void_reason = voidReason.trim();
+      if (action === "issue" && confirmDuplicate) payload.confirm_duplicate = true;
 
       const response = await fetch("/api/admin/crm/invoices/", {
         method: "PATCH",
@@ -300,12 +445,17 @@ export default function CrmInvoiceEditor({
         body: JSON.stringify(payload),
       });
       const body = await readApi(response);
+      if (response.status === 409 && body.code === "POSSIBLE_DUPLICATE_INVOICE") {
+        setDuplicateInvoices((body.duplicates as typeof duplicateInvoices) || []);
+        return;
+      }
       if (!response.ok || body.ok === false) {
         setError(String(body.error || `${action} failed`));
         await load(id);
         return;
       }
       if (action === "issue") {
+        setDuplicateInvoices([]);
         showNotice({
           kind: "success",
           title: "Invoice issued",
@@ -340,20 +490,45 @@ export default function CrmInvoiceEditor({
   };
 
   const openPdfSnapshot = async () => {
-    if (!invoice?.id) {
-      setError("Save the invoice first, then generate the PDF view.");
-      return;
-    }
-    const preview = window.open(`/admin-dashboard/crm/invoices/${invoice.id}/preview`, "_blank", "noopener,noreferrer");
+    const preview = window.open("", "_blank");
     if (!preview) {
       setError("Allow pop-ups to open the invoice PDF preview, then click Download PDF.");
       return;
     }
+    const id = invoice?.id || (await saveDraft({ silent: true }));
+    if (!id) {
+      preview.close();
+      setError("Complete the customer and saveable invoice details before previewing.");
+      return;
+    }
+    preview.location.href = `/admin-dashboard/crm/invoices/${id}/preview`;
     showNotice({
       kind: "success",
       title: "PDF view generated",
       detail: "Click Download PDF in the new tab. The file saves to your device — it does not open the print dialog.",
     });
+  };
+
+  const addInternalNote = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!invoice?.id || !internalNote.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/crm/invoices/", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: invoice.id, action: "add_internal_note", note: internalNote }),
+      });
+      const body = await readApi(response);
+      if (!response.ok) throw new Error(String(body.error || "Unable to save internal note"));
+      setInternalNote("");
+      await load(invoice.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save internal note");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const recordPayment = async (event: FormEvent) => {
@@ -439,18 +614,67 @@ export default function CrmInvoiceEditor({
 
   const draftTotals = useMemo(() => {
     const items = lines.map((line) => ({
-      quantity: Number(line.quantity || 1),
+      quantity: Number(line.quantity || 0),
       unit_cents: dollarsToCents(line.unit_dollars) || 0,
+      taxable: line.taxable,
     }));
-    return invoiceMoneyFromItems(items, dollarsToCents(taxDollars) || 0);
-  }, [lines, taxDollars]);
+    return calculateInvoiceTotals({
+      items,
+      discountType,
+      discountValue: Number(discountValue || 0),
+      taxEnabled,
+      taxRateBps: Math.max(0, Math.round(Number(taxRatePercent || 0) * 100)),
+    });
+  }, [discountType, discountValue, lines, taxEnabled, taxRatePercent]);
 
   const subtotal = draft ? draftTotals.subtotal_cents : invoice?.subtotal_cents;
+  const discount = draft ? draftTotals.discount_cents : invoice?.discount_cents;
   const tax = draft ? draftTotals.tax_cents : invoice?.tax_cents;
   const total = draft ? draftTotals.total_cents : invoice?.total_cents;
 
+  const draftFingerprint = useMemo(
+    () =>
+      JSON.stringify({
+        customer_id: customerId,
+        billing_address_id: billingAddressId || null,
+        service_address_id: serviceAddressId || null,
+        invoice_date: invoiceDate,
+        service_date: serviceDate || null,
+        due_date: dueDate || null,
+        notes,
+        discount_type: discountType,
+        discount_value: Number(discountValue || 0),
+        discount_reason: discountReason,
+        show_discount_reason: showDiscountReason,
+        tax_enabled: taxEnabled,
+        tax_rate_bps: Math.max(0, Math.round(Number(taxRatePercent || 0) * 100)),
+        items: lines.map((line) => ({
+          id: line.id,
+          description: line.description,
+          details: line.details,
+          quantity: Number(line.quantity || 1),
+          unit_label: line.unit_label,
+          unit_dollars: line.unit_dollars,
+          taxable: line.taxable,
+        })),
+      }),
+    [billingAddressId, customerId, discountReason, discountType, discountValue, dueDate, invoiceDate, lines, notes, serviceAddressId, serviceDate, showDiscountReason, taxEnabled, taxRatePercent],
+  );
+
+  useEffect(() => {
+    if (!draft || draftFingerprint === lastSavedFingerprint.current) return;
+    setSaveState("unsaved");
+    if (!invoice?.id || !customerId) return;
+    const timer = window.setTimeout(() => {
+      void saveDraft({ silent: true });
+    }, 2500);
+    return () => window.clearTimeout(timer);
+    // saveDraft intentionally follows the latest controlled form state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, draft, draftFingerprint, invoice?.id]);
+
   return (
-    <div className="relative min-h-full overflow-x-hidden bg-[#F4F7FB] p-4 sm:p-6">
+    <div className="relative min-h-full overflow-x-hidden bg-[#F4F7FB] p-4 pb-28 sm:p-6 sm:pb-28 xl:pb-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#4A86F7]">Invoice CRM</p>
@@ -488,7 +712,13 @@ export default function CrmInvoiceEditor({
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Customer
-                <select className={`${fieldClass} mt-1.5`} value={customerId} disabled={!draft} onChange={(event) => setCustomerId(event.target.value)} required>
+                <select
+                  className={`${fieldClass} mt-1.5`}
+                  value={customerId}
+                  disabled={!draft}
+                  onChange={(event) => chooseCustomer(event.target.value)}
+                  required
+                >
                   <option value="">Select customer</option>
                   {customers.map((customer) => (
                     <option key={customer.id} value={customer.id}>
@@ -499,20 +729,57 @@ export default function CrmInvoiceEditor({
                 </select>
               </label>
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Invoice date
+                <input className={`${fieldClass} mt-1.5`} type="date" value={invoiceDate} disabled={!draft} onChange={(event) => setInvoiceDate(event.target.value)} />
+              </label>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Service date
+                <input className={`${fieldClass} mt-1.5`} type="date" value={serviceDate} disabled={!draft} onChange={(event) => setServiceDate(event.target.value)} />
+              </label>
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Due date
-                <input className={`${fieldClass} mt-1.5`} type="date" value={dueDate} disabled={!draft} onChange={(event) => setDueDate(event.target.value)} />
+                <input className={`${fieldClass} mt-1.5`} type="date" min={invoiceDate} value={dueDate} disabled={!draft} onChange={(event) => setDueDate(event.target.value)} />
+              </label>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Service address
+                <select className={`${fieldClass} mt-1.5`} value={serviceAddressId} disabled={!draft || !customerId} onChange={(event) => setServiceAddressId(event.target.value)}>
+                  <option value="">No service address</option>
+                  {(selectedCustomer?.crm_customer_addresses || []).filter((address) => address.is_service).map((address) => (
+                    <option key={address.id} value={address.id}>
+                      {[address.label, address.line1, address.city, address.postal_code].filter(Boolean).join(" · ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Billing address
+                <select className={`${fieldClass} mt-1.5`} value={billingAddressId} disabled={!draft || !customerId} onChange={(event) => setBillingAddressId(event.target.value)}>
+                  <option value="">No billing address</option>
+                  {(selectedCustomer?.crm_customer_addresses || []).map((address) => (
+                    <option key={address.id} value={address.id}>
+                      {address.is_billing ? "Default · " : ""}{[address.label, address.line1, address.city, address.postal_code].filter(Boolean).join(" · ")}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
 
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Notes
+              Customer-visible notes
               <textarea
                 className="mt-1.5 min-h-24 w-full rounded-xl border border-slate-200 bg-white p-3.5 text-[13px] outline-none transition focus:border-[#4A86F7] focus:ring-4 focus:ring-[#4A86F7]/10"
                 value={notes}
                 disabled={!draft}
                 onChange={(event) => setNotes(event.target.value)}
-                placeholder="Optional notes printed on the invoice"
+                placeholder="Optional notes shown on the PDF and email"
               />
+              <span className="mt-1 block normal-case tracking-normal text-slate-400">This text is visible to the customer.</span>
             </label>
 
             <div>
@@ -522,44 +789,121 @@ export default function CrmInvoiceEditor({
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 text-[12px] font-bold text-[#4A86F7]"
-                    onClick={() => setLines((current) => [...current, { description: "", quantity: "1", unit_dollars: "0.00" }])}
+                    onClick={() => setLines((current) => [...current, blankLine()])}
                   >
                     <Plus size={14} />
                     Add line
                   </button>
                 ) : null}
               </div>
-              <div className="overflow-hidden rounded-2xl border border-slate-100">
-                <div className="hidden grid-cols-[1fr_88px_120px_40px] bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:grid">
-                  <span>Description</span>
-                  <span>Qty</span>
-                  <span>Unit (CAD)</span>
-                  <span />
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {lines.map((line, index) => (
-                    <div key={line.id || index} className="grid gap-2 p-3 sm:grid-cols-[1fr_88px_120px_40px]">
-                      <input className={fieldClass} placeholder="Description" value={line.description} disabled={!draft} onChange={(event) => setLines((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, description: event.target.value } : row)))} />
-                      <input className={fieldClass} placeholder="Qty" value={line.quantity} disabled={!draft} onChange={(event) => setLines((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, quantity: event.target.value } : row)))} />
-                      <input className={fieldClass} placeholder="0.00" value={line.unit_dollars} disabled={!draft} onChange={(event) => setLines((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, unit_dollars: event.target.value } : row)))} />
-                      {draft ? (
-                        <button type="button" className="text-rose-500" onClick={() => setLines((current) => current.filter((_, rowIndex) => rowIndex !== index))}>
-                          ×
-                        </button>
-                      ) : (
-                        <span />
-                      )}
+              <div className="space-y-3">
+                {lines.map((line, index) => {
+                  const quantity = Number(line.quantity || 0);
+                  const unitCents = dollarsToCents(line.unit_dollars) || 0;
+                  return (
+                    <div key={line.id || index} className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3 sm:p-4">
+                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_100px_150px_130px]">
+                        <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Service description
+                          <input
+                            className={`${fieldClass} mt-1.5`}
+                            placeholder="e.g. Standard home cleaning"
+                            value={line.description}
+                            disabled={!draft}
+                            onChange={(event) => updateLine(index, { description: event.target.value })}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && draft) {
+                                event.preventDefault();
+                                setLines((current) => [...current, blankLine()]);
+                              }
+                            }}
+                          />
+                        </label>
+                        <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Quantity
+                          <input className={`${fieldClass} mt-1.5`} type="number" min="0.001" step="0.001" inputMode="decimal" value={line.quantity} disabled={!draft} onChange={(event) => updateLine(index, { quantity: event.target.value })} />
+                        </label>
+                        <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Unit
+                          <select className={`${fieldClass} mt-1.5`} value={line.unit_label} disabled={!draft} onChange={(event) => updateLine(index, { unit_label: event.target.value })}>
+                            <option value="each">Each</option>
+                            <option value="hour">Hour</option>
+                            <option value="manpower hour">Manpower hour</option>
+                            <option value="service">Service</option>
+                            <option value="flat">Flat</option>
+                          </select>
+                        </label>
+                        <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Rate (CAD)
+                          <input className={`${fieldClass} mt-1.5`} inputMode="decimal" placeholder="0.00" value={line.unit_dollars} disabled={!draft} onChange={(event) => updateLine(index, { unit_dollars: event.target.value })} />
+                        </label>
+                      </div>
+                      <label className="mt-3 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Optional details
+                        <textarea className="mt-1.5 min-h-16 w-full rounded-xl border border-slate-200 bg-white p-3 text-[13px] outline-none focus:border-[#4A86F7] focus:ring-4 focus:ring-[#4A86F7]/10" placeholder="Extra scope shown beneath this line" value={line.details} disabled={!draft} onChange={(event) => updateLine(index, { details: event.target.value })} />
+                      </label>
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                        <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-slate-600">
+                          <input type="checkbox" checked={line.taxable} disabled={!draft} onChange={(event) => updateLine(index, { taxable: event.target.checked })} />
+                          Taxable
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <span className="mr-2 text-[13px] font-bold text-slate-800">{formatCad(Math.round(quantity * unitCents))}</span>
+                          {draft ? (
+                            <>
+                              <button type="button" aria-label="Move line up" disabled={index === 0} className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 disabled:opacity-30" onClick={() => moveLine(index, -1)}><ChevronUp size={15} /></button>
+                              <button type="button" aria-label="Move line down" disabled={index === lines.length - 1} className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 disabled:opacity-30" onClick={() => moveLine(index, 1)}><ChevronDown size={15} /></button>
+                              <button type="button" aria-label="Copy line" className="rounded-lg border border-slate-200 bg-white p-2 text-[#4A86F7]" onClick={() => setLines((current) => [...current.slice(0, index + 1), { ...line, id: undefined }, ...current.slice(index + 1)])}><Copy size={15} /></button>
+                              <button type="button" aria-label="Remove line" disabled={lines.length === 1} className="rounded-lg border border-rose-200 bg-white p-2 text-rose-500 disabled:opacity-30" onClick={() => setLines((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={15} /></button>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Tax (CAD)
-                <input className={`${fieldClass} mt-1.5 max-w-[180px]`} value={taxDollars} disabled={!draft} onChange={(event) => setTaxDollars(event.target.value)} />
-              </label>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Discount and GST</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Discount type
+                  <select className={`${fieldClass} mt-1.5`} value={discountType} disabled={!draft} onChange={(event) => setDiscountType(event.target.value as InvoiceDiscountType)}>
+                    <option value="none">No discount</option>
+                    <option value="fixed">Fixed amount</option>
+                    <option value="percent">Percentage</option>
+                  </select>
+                </label>
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Discount value
+                  <input className={`${fieldClass} mt-1.5`} type="number" min="0" step={discountType === "percent" ? "0.01" : "0.01"} value={discountValue} disabled={!draft || discountType === "none"} onChange={(event) => setDiscountValue(event.target.value)} />
+                </label>
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  GST rate (%)
+                  <input className={`${fieldClass} mt-1.5`} type="number" min="0" step="0.01" value={taxRatePercent} disabled={!draft || !taxEnabled} onChange={(event) => setTaxRatePercent(event.target.value)} />
+                </label>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Discount reason
+                  <input className={`${fieldClass} mt-1.5`} placeholder="Optional reason" value={discountReason} disabled={!draft || discountType === "none"} onChange={(event) => setDiscountReason(event.target.value)} />
+                </label>
+                <div className="space-y-2 pb-1 text-[12px] text-slate-600">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={showDiscountReason} disabled={!draft || discountType === "none"} onChange={(event) => setShowDiscountReason(event.target.checked)} /> Show reason on invoice</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={taxEnabled} disabled={!draft} onChange={(event) => setTaxEnabled(event.target.checked)} /> Apply GST</label>
+                </div>
+              </div>
+              {taxEnabled && Number(taxRatePercent || 0) > 0 && !settings.tax_number?.trim() ? (
+                <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-800">Add the company GST number in CRM Settings before issuing this invoice.</p>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <p className="text-[12px] font-semibold text-slate-500">
+                {saveState === "saving" ? "Saving…" : saveState === "unsaved" ? "Unsaved changes" : "All changes saved"}
+              </p>
               {draft ? (
                 <button type="button" disabled={saving || !customerId} onClick={() => void saveDraft()} className="h-11 rounded-xl bg-slate-900 px-5 text-[13px] font-bold text-white shadow-sm disabled:opacity-50">
                   {saving ? "Saving..." : "Save draft"}
@@ -577,13 +921,14 @@ export default function CrmInvoiceEditor({
             </p>
             <dl className="mt-4 space-y-2 text-[13px] text-slate-600">
               <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatCad(subtotal)}</dd></div>
-              <div className="flex justify-between"><dt>Tax</dt><dd>{formatCad(tax)}</dd></div>
+              {Number(discount || 0) > 0 ? <div className="flex justify-between text-emerald-700"><dt>Discount</dt><dd>−{formatCad(discount)}</dd></div> : null}
+              <div className="flex justify-between"><dt>GST{taxEnabled ? ` (${Number(taxRatePercent || 0)}%)` : ""}</dt><dd>{formatCad(tax)}</dd></div>
               <div className="flex justify-between border-t border-slate-100 pt-2 text-[15px] font-bold text-slate-900">
                 <dt>Total</dt>
                 <dd>{formatCad(total)}</dd>
               </div>
-              <div className="flex justify-between"><dt>Paid</dt><dd className="text-emerald-700">{formatCad(invoice?.amount_paid_cents)}</dd></div>
-              <div className="flex justify-between font-semibold text-slate-900"><dt>Balance</dt><dd>{formatCad(invoice?.balance_cents)}</dd></div>
+              <div className="flex justify-between"><dt>Paid</dt><dd className="text-emerald-700">{formatCad(draft ? 0 : invoice?.amount_paid_cents)}</dd></div>
+              <div className="flex justify-between font-semibold text-slate-900"><dt>Balance</dt><dd>{formatCad(draft ? total : invoice?.balance_cents)}</dd></div>
             </dl>
           </div>
 
@@ -603,22 +948,24 @@ export default function CrmInvoiceEditor({
               <Mail size={15} />
               Send invoice
             </button>
-            <button type="button" disabled={saving || !issued} onClick={() => void runAction("remind")} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-700 disabled:opacity-50">
-              <Bell size={15} />
-              Send reminder
-            </button>
             {invoice?.id ? (
-              <button type="button" disabled={saving} onClick={() => void openPdfSnapshot()} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-700 disabled:opacity-50">
-                <FileText size={15} />
-                Preview / PDF snapshot
-              </button>
+              <CrmReminderPanel
+                invoiceId={invoice.id}
+                customerEmail={sendEmail || invoice.crm_customers?.email || ""}
+                disabled={saving || !issued}
+                onChanged={() => load(invoice.id)}
+              />
             ) : null}
+            <button type="button" disabled={saving || !customerId} onClick={() => void openPdfSnapshot()} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-700 disabled:opacity-50">
+              <Eye size={15} />
+              Preview / PDF snapshot
+            </button>
 
             {isAdmin && issued ? (
               <div className="space-y-2 border-t border-slate-100 pt-4">
                 <p className="text-[12px] font-bold text-slate-800">Cancel bill</p>
                 <p className="text-[12px] leading-5 text-slate-500">
-                  Void cancels this issued invoice. The unique number and audit trail stay. Data-entry cannot void.
+                  Void cancels this issued invoice. The unique number and audit trail stay.
                 </p>
                 <input className={fieldClass} placeholder="Void reason (required)" value={voidReason} onChange={(event) => setVoidReason(event.target.value)} />
                 <label className="flex items-center gap-2 text-[12px] text-slate-600">
@@ -632,6 +979,32 @@ export default function CrmInvoiceEditor({
               </div>
             ) : !isAdmin ? (
               <p className="text-[12px] text-slate-500">Voiding is admin-only.</p>
+            ) : null}
+          </div>
+
+          <div className="rounded-3xl border border-amber-200 bg-amber-50/70 p-5 shadow-[0_18px_50px_rgba(19,38,58,0.04)]">
+            <p className="flex items-center gap-2 text-[12px] font-bold text-amber-900">
+              <StickyNote size={16} />
+              INTERNAL — customer cannot see this
+            </p>
+            <p className="mt-1 text-[12px] leading-5 text-amber-800">These notes never appear in the PDF or invoice email.</p>
+            {invoice?.id ? (
+              <form className="mt-3 space-y-2" onSubmit={addInternalNote}>
+                <textarea className="min-h-20 w-full rounded-xl border border-amber-200 bg-white p-3 text-[13px] outline-none focus:border-amber-400" placeholder="Private staff note" value={internalNote} onChange={(event) => setInternalNote(event.target.value)} />
+                <button type="submit" disabled={saving || !internalNote.trim()} className="h-10 w-full rounded-xl bg-amber-900 text-[12px] font-bold text-white disabled:opacity-50">Add internal note</button>
+              </form>
+            ) : (
+              <p className="mt-3 text-[12px] text-amber-800">Save the draft once before adding internal notes.</p>
+            )}
+            {invoice?.crm_invoice_internal_notes?.length ? (
+              <div className="mt-3 space-y-2 border-t border-amber-200 pt-3">
+                {invoice.crm_invoice_internal_notes.map((note) => (
+                  <div key={note.id} className="rounded-xl bg-white/90 px-3 py-2 text-[12px] text-slate-700">
+                    <p className="whitespace-pre-wrap break-words">{note.note}</p>
+                    <p className="mt-1 text-[10px] text-slate-400">{new Date(note.created_at).toLocaleString()}</p>
+                  </div>
+                ))}
+              </div>
             ) : null}
           </div>
 
@@ -719,6 +1092,41 @@ export default function CrmInvoiceEditor({
           ) : null}
         </aside>
       </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-12px_35px_rgba(15,23,42,0.12)] backdrop-blur xl:hidden">
+        <div className="mx-auto flex max-w-xl items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Invoice total</p>
+            <p className="truncate text-lg font-extrabold text-slate-900">{formatCad(total)}</p>
+          </div>
+          {draft ? (
+            <button type="button" disabled={saving || !customerId} onClick={() => void saveDraft()} className="h-11 rounded-xl border border-slate-200 px-4 text-[12px] font-bold text-slate-700 disabled:opacity-50">Save</button>
+          ) : null}
+          <button type="button" disabled={saving || !customerId} onClick={() => void openPdfSnapshot()} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#4A86F7] px-4 text-[12px] font-bold text-white disabled:opacity-50"><Eye size={15} /> Preview</button>
+        </div>
+      </div>
+
+      {duplicateInvoices.length ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={() => setDuplicateInvoices([])}>
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-600">Possible duplicate</p>
+            <h2 className="mt-2 text-slate-900">A similar invoice already exists</h2>
+            <p className="mt-2 text-[13px] leading-6 text-slate-500">Review these invoices before creating another numbered bill for the same customer, address, date and similar total.</p>
+            <div className="mt-4 max-h-52 space-y-2 overflow-y-auto">
+              {duplicateInvoices.map((row) => (
+                <div key={row.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-[12px]">
+                  <span className="font-bold text-slate-800">{row.invoice_number || "Draft"}</span>
+                  <span className="text-slate-500">{row.invoice_date} · {formatCad(row.total_cents)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button type="button" className="h-11 rounded-xl border border-slate-200 text-[13px] font-bold text-slate-700" onClick={() => setDuplicateInvoices([])}>Go back</button>
+              <button type="button" disabled={saving} className="h-11 rounded-xl bg-amber-600 text-[13px] font-bold text-white disabled:opacity-50" onClick={() => void runAction("issue", true)}>Issue anyway</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {notice ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 px-4" onClick={() => setNotice(null)}>

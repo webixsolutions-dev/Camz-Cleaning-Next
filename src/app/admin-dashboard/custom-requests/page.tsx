@@ -15,6 +15,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { serviceTypes } from "@/data/customCleaning";
 import EstimatorActualsEditor from "@/components/admin/EstimatorActualsEditor";
+import CustomCleaningShareLinks from "@/components/admin/CustomCleaningShareLinks";
 
 type ChecklistSection = {
   tasks?: string[];
@@ -338,6 +339,10 @@ export default async function CustomRequestsPage({
                         {selected.status}
                       </span>
                     </div>
+                    <p className="mt-1 text-[10px] font-bold tracking-wide text-[#4A86F7]">
+                      {String(selected.property_details?.submission_reference || `CAMZ-${selected.id.slice(0, 8).toUpperCase()}`)}
+                      {selected.property_details?.checklist_link_mode ? ` · ${selected.property_details.checklist_link_mode === "price" ? "Checklist with price" : "Checklist without price"}` : ""}
+                    </p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
                       <span className="flex items-center gap-1.5">
@@ -683,6 +688,8 @@ export default async function CustomRequestsPage({
             </div>
           </div>
         </section>
+
+        <CustomCleaningShareLinks />
 
         {/* FILTERS */}
         <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

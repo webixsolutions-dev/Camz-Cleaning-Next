@@ -5,6 +5,7 @@ export { isDeliverableEmail } from "@/lib/crm/emailAddress";
 
 export async function sendCrmInvoiceEmail(options: {
   to: string;
+  bcc?: string | null;
   subject: string;
   html: string;
   replyTo?: string | null;
@@ -35,6 +36,7 @@ export async function sendCrmInvoiceEmail(options: {
     const info = await transporter.sendMail({
       from: `"Camz Cleaning" <${process.env.SMTP_USER}>`,
       to: options.to,
+      bcc: options.bcc || undefined,
       replyTo: options.replyTo || undefined,
       subject: options.subject,
       html: options.html,
@@ -51,4 +53,13 @@ export async function sendCrmInvoiceEmail(options: {
     console.error("CRM invoice email failed:", error);
     return { ok: false as const, error: explainMailFailure(message) };
   }
+}
+
+// Backward-compatible alias used by the payment-receipt workflow. Keeping the
+// transport in one place ensures SMTP, BCC, attachment, and error handling stay
+// identical for invoices, reminders, and receipts.
+export async function sendCrmPaymentReceiptEmail(
+  options: Parameters<typeof sendCrmInvoiceEmail>[0],
+) {
+  return sendCrmInvoiceEmail(options);
 }

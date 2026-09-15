@@ -1,10 +1,15 @@
 import CrmInvoicePdfPreview from "@/components/admin/crm/CrmInvoicePdfPreview";
 
+type PageProps = {
+  params: Promise<{
+    id: string;
+  }>;
+};
+
 export default async function CrmInvoicePdfPreviewPage({
   params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+}: PageProps) {
   const { id } = await params;
+
   return <CrmInvoicePdfPreview invoiceId={id} />;
 }

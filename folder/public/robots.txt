@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+Disallow: /login/
+Disallow: /api/
+Disallow: /_next/static/
+
+Sitemap: https://camzcleaning.com/sitemap.xml

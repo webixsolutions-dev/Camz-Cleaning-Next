@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  /* Custom Colors */
+  --primary: #02c0e6;
+  --btn-color: #fff0;
+
+  /* Font */
+  --font-sans: var(--font-poppins);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-primary: var(--primary);
+  --color-btn: var(--btn-color);
+
+  --font-sans: var(--font-poppins);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-poppins), sans-serif;
+}
+
+.container-custom {
+  @apply max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8;
+}
+
+/* ✅ Typography Improvements */
+h1 {
+  @apply text-4xl  font-bold leading-tight;
+}
+
+h2 {
+  @apply text-[42px]  font-bold;
+}
+
+h3 {
+  @apply text-xl md:text-2xl font-semibold;
+}
+
+p {
+  @apply text-base  leading-relaxed;
+}
+/* Base button (optional for reuse in JSX, not inside @apply) */
+.btn {
+  @apply px-6 py-3 rounded-xl font-medium inline-flex items-center justify-center transition duration-200;
+}
+
+/* Primary */
+.btn-primary {
+  @apply px-10 py-3 rounded-md font-medium inline-flex items-center justify-center transition cursor-pointer duration-200 bg-[var(--primary)] text-white hover:opacity-90;
+}
+
+/* Secondary */
+.btn-secondary {
+  @apply px-6 py-3 rounded-xl font-medium inline-flex items-center justify-center transition duration-200 bg-[var(--btn-color)] text-white hover:opacity-90;
+}
