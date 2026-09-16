@@ -20,6 +20,13 @@ type Submission = {
 };
 
 const text = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
+const serviceAreaPrefixes: Record<string, RegExp> = {
+  Calgary: /^(T1Y|T2[A-Z]|T3[A-Z])$/,
+  Airdrie: /^T4[AB]$/,
+  Cochrane: /^T4C$/,
+  Chestermere: /^T1X$/,
+};
+const canadianPostalPattern = /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ][ -]?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i;
 
 function requestReference(id: string) {
   const date = new Intl.DateTimeFormat("en-CA", {
@@ -60,6 +67,17 @@ export async function submitCustomCleaningRequest(request: NextRequest, mode: Es
   if (!checklist.consent?.terms_accepted || !Array.isArray(checklist.selected_tasks) || checklist.selected_tasks.length === 0) {
     return NextResponse.json({ error: "Select at least one task and accept the terms." }, { status: 400 });
   }
+  const serviceArea = text(property.service_area, 40);
+  const postalCode = text(property.postal_code, 10).toUpperCase();
+  const compactPostal = postalCode.replace(/[\s-]/g, "");
+  if (
+    property.address_verified !== true ||
+    !serviceAreaPrefixes[serviceArea] ||
+    !canadianPostalPattern.test(postalCode) ||
+    !serviceAreaPrefixes[serviceArea].test(compactPostal.slice(0, 3))
+  ) {
+    return NextResponse.json({ error: "Verify a supported service address before submitting." }, { status: 400 });
+  }
 
   const supabase = createPublicServerClient();
   const { config, tasks } = await loadEstimatorDefinition(supabase);
@@ -95,7 +113,9 @@ export async function submitCustomCleaningRequest(request: NextRequest, mode: Es
     },
     selected: checklist.selected_tasks.map((item: any) => ({
       task_id: text(item?.task_id, 80),
-      quantity: Number(item?.quantity) || 1,
+      quantity: Number.isFinite(Number(item?.quantity)) && Number(item?.quantity) > 0
+        ? Number(item.quantity)
+        : undefined,
       condition: ["maintained", "attention", "heavy", "very_heavy"].includes(item?.condition) ? item.condition : undefined,
     })),
   }, config, tasks);

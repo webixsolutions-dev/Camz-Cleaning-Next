@@ -46,6 +46,17 @@ type Carpet = {
   furniture: "customer" | "assessment" | "none";
 };
 type Range = { min: number; max: number };
+type GeocodeResult = {
+  display_name?: string;
+  address?: {
+    city?: string;
+    town?: string;
+    village?: string;
+    municipality?: string;
+    county?: string;
+    postcode?: string;
+  };
+};
 
 const CATEGORIES: { id: Category; label: string; description: string }[] = [
   {id:"bedroom",label:"Bedrooms",description:"General room cleaning and selected details"},
@@ -105,7 +116,6 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
   const [quantities,setQuantities]=useState<Record<string,number>>({});
   const [itemConditions,setItemConditions]=useState<Record<string,Condition>>({});
   const [expanded,setExpanded]=useState<Category|null>("bedroom");
-  const [baselineReady,setBaselineReady]=useState(false);
   const [carpet,setCarpet]=useState<Carpet>({
     enabled:false,rooms:1,largeRooms:0,halls:0,stairs:0,closets:0,
     heavySoil:false,petTreatment:false,furniture:"customer",
@@ -113,8 +123,12 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
   const [budget,setBudget]=useState<"fixed"|"extend">("extend");
   const [priorities,setPriorities]=useState<Category[]>(["kitchen","bathroom","bedroom","common","basement"]);
   const [frequency,setFrequency]=useState("One-time");
+  const [propertyAddress,setPropertyAddress]=useState("");
   const [serviceArea,setServiceArea]=useState("");
   const [postalCode,setPostalCode]=useState("");
+  const [addressVerified,setAddressVerified]=useState(false);
+  const [addressVerifying,setAddressVerifying]=useState(false);
+  const [verifiedAddress,setVerifiedAddress]=useState("");
   const [photos,setPhotos]=useState<File[]>([]);
   const [locationError,setLocationError]=useState("");
   const [photoError,setPhotoError]=useState("");
@@ -149,10 +163,26 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
   const availableTasks=useMemo(()=>TASKS.filter(task=>task.customerVisible&&task.adminActive),[TASKS]);
   const visibleTasks=useMemo(()=>availableTasks.filter(task=>mode!=="price"||task.priceModeVisible||selectedIds.includes(task.id)),[availableTasks,mode,selectedIds]);
   const selectedTasks=useMemo(()=>availableTasks.filter(task=>selectedIds.includes(task.id)),[selectedIds,availableTasks]);
+  useEffect(()=>{
+    if(step!==1)return;
+    const baselineIds=availableTasks
+      .filter(task=>task.baseline&&(mode!=="price"||task.priceModeVisible)&&categoryAvailable(task.category))
+      .map(task=>task.id);
+    const baselineSet=new Set(availableTasks.filter(task=>task.baseline).map(task=>task.id));
+    setSelectedIds(current=>{
+      const next=Array.from(new Set([...current.filter(id=>!baselineSet.has(id)),...baselineIds]));
+      return next.length===current.length&&next.every((id,index)=>id===current[index])?current:next;
+    });
+  },[step,availableTasks,mode,property.bedrooms,property.fullBaths,property.halfBaths,property.basement]);
+  const selectedInput=useMemo(()=>selectedIds.map(task_id=>{
+    const task=availableTasks.find(item=>item.id===task_id);
+    const propertyDriven=task?.baseline&&["bedrooms","bathrooms","basement","property"].includes(task.basis);
+    return {task_id,quantity:propertyDriven?undefined:quantities[task_id],condition:itemConditions[task_id]};
+  }),[selectedIds,availableTasks,quantities,itemConditions]);
   const calculation=useMemo(()=>calculateAuthoritativeEstimate({
     mode:mode||"time",budget,property:{...property,clutter:property.excessiveClutter?"excessive":"low"},carpet,
-    selected:selectedIds.map(task_id=>({task_id,quantity:quantities[task_id],condition:itemConditions[task_id]})),
-  },CONFIG,availableTasks),[mode,budget,property,carpet,selectedIds,quantities,itemConditions,CONFIG,availableTasks]);
+    selected:selectedInput,
+  },CONFIG,availableTasks),[mode,budget,property,carpet,selectedInput,CONFIG,availableTasks]);
   const snapshot=calculation.estimate;
   const actualMinutes={min:snapshot.general_minutes_min,max:snapshot.general_minutes_max};
   const shownMinutes={min:snapshot.display_minutes_min,max:snapshot.display_minutes_max};
@@ -177,10 +207,39 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
   };
   const addRecommendation=(rule:EstimatorRecommendation)=>{const allowed=new Set(visibleTasks.map(task=>task.id));setSelectedIds(current=>Array.from(new Set([...current,...rule.taskIds.filter(id=>allowed.has(id))])));setQuantities(current=>{const next={...current};for(const id of rule.taskIds){const task=visibleTasks.find(item=>item.id===id);if(task&&next[id]===undefined)next[id]=defaultQty(task);}return next;});if(rule.enablesCarpet)setCarpet(current=>({...current,enabled:true,rooms:Math.max(1,current.rooms)}));setDismissedRecommendations(current=>[...current,rule.id]);trackEstimatorEvent("camz_estimator_recommendation_accepted",{mode,rule_id:rule.id});};
   const recommendationApplies=(rule:EstimatorRecommendation)=>!dismissedRecommendations.includes(rule.id)&&(rule.trigger==="kitchen"||(rule.trigger==="bedroom_carpet"&&property.bedroomCarpet)||(rule.trigger==="pets"&&property.pets)||(rule.trigger==="move_out"&&(property.purpose==="move_in"||property.purpose==="move_out"))||(rule.trigger==="bathroom"&&property.fullBaths+property.halfBaths>0)||(rule.trigger==="basement"&&property.basement!=="none"));
-  const next=()=>{
-    if(step===1&&!baselineReady){
-      setSelectedIds(visibleTasks.filter(task=>task.baseline&&categoryAvailable(task.category)).map(task=>task.id));
-      setBaselineReady(true);
+  const invalidateAddress=()=>{
+    setAddressVerified(false);setVerifiedAddress("");setLocationError("");
+  };
+  const verifyPropertyAddress=async()=>{
+    const address=propertyAddress.trim();
+    const compact=postalCode.replace(/\s|-/g,"").toUpperCase();
+    const normalized=compact.length===6?`${compact.slice(0,3)} ${compact.slice(3)}`:postalCode.trim().toUpperCase();
+    if(address.length<6){setLocationError("Enter a complete property address before continuing.");return false;}
+    if(!serviceAreas.includes(serviceArea as ServiceArea)){setLocationError("Select Calgary, Airdrie, Cochrane or Chestermere.");return false;}
+    if(!postalPattern.test(normalized)){setLocationError("Enter a valid postal code, for example T2P 1J9.");return false;}
+    if(!areaPrefixes[serviceArea as ServiceArea].test(compact.slice(0,3))){setLocationError(`This postal code does not match ${serviceArea}.`);return false;}
+    setAddressVerifying(true);setLocationError("");
+    try{
+      const query=encodeURIComponent(`${address}, ${serviceArea}, Alberta ${normalized}, Canada`);
+      const response=await fetch(`/api/geocode?type=search&q=${query}`,{headers:{Accept:"application/json"},cache:"no-store"});
+      const results=(await response.json().catch(()=>[])) as GeocodeResult[]|{error?:string};
+      if(!response.ok||!Array.isArray(results))throw new Error(!Array.isArray(results)&&results.error?results.error:"Address lookup failed.");
+      const expectedArea=serviceArea.toLowerCase();
+      const match=results.find(result=>{
+        const details=result.address||{};
+        const place=[details.city,details.town,details.village,details.municipality,details.county,result.display_name].filter(Boolean).join(" ").toLowerCase();
+        const resultPostal=(details.postcode||"").replace(/\s|-/g,"").toUpperCase();
+        return place.includes(expectedArea)&&(!resultPostal||resultPostal.startsWith(compact.slice(0,3)));
+      });
+      if(!match){setLocationError(`We could not verify this address inside ${serviceArea}'s service area.`);return false;}
+      setAddressVerified(true);setVerifiedAddress(match.display_name||`${address}, ${serviceArea}, AB ${normalized}`);return true;
+    }catch(error){setLocationError(error instanceof Error?error.message:"Address lookup is temporarily unavailable.");return false;}
+    finally{setAddressVerifying(false);}
+  };
+  const next=async()=>{
+    if(step===1){
+      if(!property.type)return;
+      if(!addressVerified&&!(await verifyPropertyAddress()))return;
     }
     if(step<STEPS.length)setStep(current=>current+1);
     window.scrollTo({top:360,behavior:"smooth"});
@@ -236,7 +295,7 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
       if(error){setStatus("error");setErrorMessage("We could not attach the photos. Check their size and try again.");return;}
       photoPaths.push(path);
     }
-    const taskSnapshot=calculation.selectedTasks;
+    const taskSnapshot=selectedInput;
     const estimate={
       estimator_version:CONFIG.version,mode,
       general_minutes_min:Math.round(actualMinutes.min),general_minutes_max:Math.round(actualMinutes.max),
@@ -259,9 +318,10 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
     };
     const payload={
       id:requestId,customer_name:form.get("customer_name"),email:form.get("email"),
-      phone:form.get("phone"),address:form.get("address"),
+      phone:form.get("phone"),address:propertyAddress,
       service_types:["professional_cleaning"],
       property_details:{...property,service_area:serviceArea,postal_code:normalized,province:"Alberta",country:"Canada",
+        address_verified:addressVerified,verified_address:verifiedAddress,
         frequency,parking:form.get("parking"),access_method:form.get("access_method"),estimate},
       checklist:{selected_tasks:taskSnapshot,carpet,priority_order:priorities.filter(category=>selectedCategories.some(item=>item.id===category)),
         photo_paths:photoPaths,recommendations_dismissed:dismissedRecommendations,consent:{terms_accepted:true,accepted_at:new Date().toISOString()}},
@@ -375,6 +435,17 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
                 {step===1&&<div className="mt-8 space-y-8">
                   <Choice label="Property type" value={property.type} onChange={value=>setProperty(current=>({...current,type:value as Property["type"]}))}
                     options={[["house","House"],["townhouse","Townhouse"],["condo","Condo"],["apartment","Apartment"]]}/>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                    <div className="mb-4"><h3 className="font-bold text-slate-900">Property address</h3><p className="mt-1 text-xs text-slate-600">Verify the service location before continuing. We currently serve Calgary, Airdrie, Cochrane and Chestermere.</p></div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="sm:col-span-2"><label htmlFor="property_address" className="mb-2 block text-sm font-semibold">Street address *</label><input id="property_address" value={propertyAddress} autoComplete="street-address" placeholder="123 Main Street" onChange={event=>{setPropertyAddress(event.target.value);invalidateAddress();}} className={inputClass}/></div>
+                      <div><label htmlFor="service_area" className="mb-2 block text-sm font-semibold">Service area *</label><select id="service_area" value={serviceArea} onChange={event=>{setServiceArea(event.target.value);invalidateAddress();}} className={inputClass}><option value="" disabled>Select your city</option>{serviceAreas.map(area=><option key={area} value={area}>{area}, AB</option>)}</select></div>
+                      <div><label htmlFor="postal_code" className="mb-2 block text-sm font-semibold">Postal code *</label><input id="postal_code" value={postalCode} maxLength={7} autoComplete="postal-code" placeholder="T2P 1J9" onChange={event=>{setPostalCode(event.target.value.toUpperCase());invalidateAddress();}} className={inputClass}/></div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" onClick={()=>void verifyPropertyAddress()} disabled={addressVerifying} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#0B4E9B] px-4 text-sm font-bold text-white disabled:opacity-50">{addressVerifying?<LoaderCircle className="animate-spin" size={17}/>:<MapPin size={17}/>} {addressVerifying?"Verifying...":"Verify address"}</button>{addressVerified&&<span className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700"><CheckCircle2 size={18}/>Address verified</span>}</div>
+                    {locationError&&<p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{locationError}</p>}
+                  </div>
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3"><p className="text-sm font-bold text-[#0B4E9B]">Live property estimate</p><p className="mt-1 text-xs text-slate-600">Bedroom, bathroom, home-size and condition changes update labour and pricing immediately. Cleaning-team size changes on-site duration only.</p></div>
                   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <CounterField label="Bedrooms" value={property.bedrooms} max={12} onChange={value=>setProperty(current=>({...current,bedrooms:value}))}/>
                     <CounterField label="Full bathrooms" value={property.fullBaths} max={10} onChange={value=>setProperty(current=>({...current,fullBaths:value}))}/>
@@ -410,15 +481,15 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
                   subtotal={subtotal} gst={gst} total={total} manual={manual} actualMinutes={actualMinutes}
                   budget={budget} setBudget={value=>{trackEstimatorEvent("camz_estimator_budget_selected",{mode,budget:value});setBudget(value);}} selectedCategories={selectedCategories} selectedTasks={selectedTasks} config={CONFIG} manualReasons={manualReasons}/>} 
                 {step===6&&<ReviewStep priorities={priorities} selectedCategories={selectedCategories} selectedTasks={selectedTasks}
-                  movePriority={movePriority} serviceArea={serviceArea} setServiceArea={setServiceArea}
-                  postalCode={postalCode} setPostalCode={setPostalCode} locationError={locationError} setLocationError={setLocationError}
+                  movePriority={movePriority} propertyAddress={propertyAddress} serviceArea={serviceArea}
+                  postalCode={postalCode} verifiedAddress={verifiedAddress}
                   frequency={frequency} setFrequency={setFrequency} today={today} photos={photos} photoError={photoError}
                   handlePhotos={handlePhotos} terms={terms} setTerms={setTerms} photosRequired={photosRequired} consentTerms={CONFIG.consentTerms}/>} 
               </section>
               <div className="flex gap-3">
                 <button type="button" onClick={back} disabled={step===1} className="flex h-12 items-center gap-2 rounded-lg border border-slate-300 bg-white px-6 font-bold text-slate-700 disabled:opacity-40"><ArrowLeft size={18}/>Back</button>
-                {step<STEPS.length&&<button type="button" onClick={next} disabled={step===1&&!property.type}
-                  className="ml-auto flex h-12 items-center gap-2 rounded-lg bg-[#00B7EB] px-6 font-bold text-white disabled:opacity-40">Continue<ArrowRight size={18}/></button>}
+                {step<STEPS.length&&<button type="button" onClick={()=>void next()} disabled={addressVerifying||step===1&&!property.type}
+                  className="ml-auto flex h-12 items-center gap-2 rounded-lg bg-[#00B7EB] px-6 font-bold text-white disabled:opacity-40">{addressVerifying?"Verifying...":"Continue"}{addressVerifying?<LoaderCircle className="animate-spin" size={18}/>:<ArrowRight size={18}/>}</button>}
               </div>
               {status==="error"&&<p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 lg:hidden">{errorMessage}</p>}
             </div>
@@ -432,7 +503,7 @@ export function CustomCleaningRequestForm({lockedMode}:{lockedMode:Mode}) {
       </main>
       {noticeState&&!dismissedNotices.includes(noticeState)&&<BaseNotice kind={noticeState} message={noticeState==="near"?CONFIG.nearIncludedMessage:CONFIG.exceededIncludedMessage} onDismiss={()=>setDismissedNotices(current=>[...current,noticeState])}/>} 
       <MobileSummary mode={mode} generalMinutes={shownMinutes} total={total} manual={manual} step={step}
-        disabled={step===1&&!property.type} canSubmit={terms&&selectedTasks.length>0} submitting={status==="submitting"} onNext={next}/>
+        disabled={addressVerifying||step===1&&!property.type} canSubmit={terms&&selectedTasks.length>0} submitting={status==="submitting"} onNext={()=>void next()}/>
     </>
   </>;
 }
@@ -510,8 +581,8 @@ function SummaryStep(props:{
 
 function ReviewStep(props:{
   priorities:Category[];selectedCategories:{id:Category;label:string}[];selectedTasks:Task[];
-  movePriority:(category:Category,direction:-1|1)=>void;serviceArea:string;setServiceArea:(value:string)=>void;
-  postalCode:string;setPostalCode:(value:string)=>void;locationError:string;setLocationError:(value:string)=>void;
+  movePriority:(category:Category,direction:-1|1)=>void;propertyAddress:string;serviceArea:string;
+  postalCode:string;verifiedAddress:string;
   frequency:string;setFrequency:(value:string)=>void;today:string;photos:File[];photoError:string;
   handlePhotos:(files:FileList|null)=>void;terms:boolean;setTerms:(value:boolean)=>void;photosRequired:boolean;consentTerms:string[];
 }){
@@ -530,14 +601,7 @@ function ReviewStep(props:{
       <Field label="Full name" name="customer_name" autoComplete="name" required/>
       <Field label="Email address" name="email" type="email" inputMode="email" autoComplete="email" required/>
       <Field label="Phone number" name="phone" type="tel" inputMode="tel" autoComplete="tel" required/>
-      <Field label="Property address" name="address" autoComplete="street-address" required/>
-      <div><label htmlFor="service_area" className="mb-2 block text-sm font-semibold">Service area *</label>
-        <select id="service_area" name="service_area" value={p.serviceArea} required onChange={event=>{p.setServiceArea(event.target.value);p.setLocationError("");}} className={inputClass}>
-          <option value="" disabled>Select your city</option>{serviceAreas.map(area=><option key={area} value={area}>{area}, AB</option>)}
-        </select></div>
-      <div><label htmlFor="postal_code" className="mb-2 block text-sm font-semibold">Postal code *</label>
-        <input id="postal_code" name="postal_code" value={p.postalCode} required maxLength={7} autoComplete="postal-code" placeholder="T2P 1J9"
-          onChange={event=>{p.setPostalCode(event.target.value.toUpperCase());p.setLocationError("");}} className={inputClass}/></div>
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 sm:col-span-2"><p className="flex items-center gap-2 text-sm font-bold text-emerald-800"><CheckCircle2 size={18}/>Verified service address</p><p className="mt-2 text-sm text-slate-700">{p.verifiedAddress||`${p.propertyAddress}, ${p.serviceArea}, AB ${p.postalCode}`}</p></div>
       <SelectField label="Preferred contact" name="preferred_contact" options={["Phone","Email","Text message"]} required/>
       <SelectField label="Frequency" name="frequency" options={["One-time","Weekly","Every 2 weeks","Every 4 weeks"]} required value={p.frequency} onChange={p.setFrequency}/>
       <SelectField label="Property access" name="access_method" options={["I will be home","Key / lockbox","Concierge","Contact me before arrival"]} required/>
@@ -549,7 +613,7 @@ function ReviewStep(props:{
         <input id="assessment_photos" type="file" accept="image/*" multiple required={p.photosRequired} onChange={event=>p.handlePhotos(event.target.files)} className="block w-full rounded-lg border border-dashed border-slate-300 p-4 text-sm"/>
         {p.photos.length>0&&<p className="mt-2 text-xs text-slate-500">{p.photos.length} photo(s) ready.</p>}{p.photoError&&<p role="alert" className="mt-2 text-sm text-red-700">{p.photoError}</p>}</div>
     </div>
-    <div className={`rounded-lg border p-3 text-sm ${p.locationError?"border-red-200 bg-red-50 text-red-700":"border-blue-100 bg-blue-50 text-[#0B4E9B]"}`} role={p.locationError?"alert":undefined}><MapPin className="mr-2 inline" size={18}/>{p.locationError||"We serve Calgary, Airdrie, Cochrane and Chestermere, Alberta."}</div>
+    <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-[#0B4E9B]"><MapPin className="mr-2 inline" size={18}/>Service area confirmed before the cleaning plan was built.</div>
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
       {p.consentTerms.map(term=><p key={term}>• {term}</p>)}
       <label className="flex cursor-pointer items-start gap-3 text-sm font-semibold text-slate-800"><input type="checkbox" required checked={p.terms} onChange={event=>p.setTerms(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-[#0B4E9B]"/>I agree to the estimated-time assumptions, selected scope and applicable service terms.</label>
