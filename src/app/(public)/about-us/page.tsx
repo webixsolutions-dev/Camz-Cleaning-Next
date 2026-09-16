@@ -8,7 +8,7 @@ import { pageSeo } from "@/lib/seo";
 export const metadata = pageSeo({
   title: "About Camz Cleaning | Our Team and Standards",
   description:
-    "Learn about Camz Cleaning, our practical experience, service approach and commitment to dependable care for homes, businesses, vehicles and properties.",
+    "Learn about Camz Cleaning, our local journey, service approach and commitment to reliable, affordable and quality cleaning in Calgary and surrounding communities.",
   path: "/about-us/",
 });
 

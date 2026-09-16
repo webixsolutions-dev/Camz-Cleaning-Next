@@ -28,7 +28,6 @@ const Counter = ({ value }: { value: string }) => {
 const StatsSection = () => {
   const stats = [
     { label: "Completed Projects", value: "120+" },
-    { label: "Years Experience", value: "6+" },
     { label: "Team Members", value: "8+" },
     { label: "Google Rating", value: "5", hasStar: true },
   ];
