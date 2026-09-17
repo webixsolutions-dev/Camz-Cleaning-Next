@@ -52,6 +52,7 @@ function normalizeRules(value: unknown) {
 export async function GET() {
   const { actor, supabase, error, status } = await getCrmActor();
   if (!actor) return NextResponse.json({ error }, { status });
+  if (!actor.isAdmin) return NextResponse.json({ error: "Only an admin can view email settings." }, { status: 403 });
 
   try {
     const [{ data: settings, error: settingsError }, rulesResult] = await Promise.all([

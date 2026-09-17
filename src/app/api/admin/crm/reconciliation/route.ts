@@ -11,6 +11,7 @@ function cents(value: unknown) {
 export async function GET(request: NextRequest) {
   const { actor, supabase, error, status } = await getCrmActor();
   if (!actor) return NextResponse.json({ error }, { status });
+  if (!actor.isAdmin) return NextResponse.json({ error: "Only an admin can access reconciliation." }, { status: 403 });
 
   try {
     const params = new URL(request.url).searchParams;
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
         .lte("received_at", `${to}T23:59:59.999Z`)
         .order("received_at", { ascending: false }),
       supabase.from("crm_reconciliation").select("*").order("created_at", { ascending: false }),
-      supabase.from("users").select("id, name, email").in("role", ["admin", "super_admin"]),
+      supabase.from("users").select("id, name, email").in("role", ["admin", "super_admin", "cleaner", "data_entry"]),
     ]);
     if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 400 });
     if (reconciliationError) return NextResponse.json({ error: reconciliationError.message }, { status: 400 });
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
   if (securityError) return securityError;
   const { actor, supabase, error, status } = await getCrmActor();
   if (!actor) return NextResponse.json({ error }, { status });
+  if (!actor.isAdmin) return NextResponse.json({ error: "Only an admin can access reconciliation." }, { status: 403 });
 
   try {
     const body = await readJsonBody<any>(request);
@@ -120,6 +122,7 @@ export async function PATCH(request: NextRequest) {
   if (securityError) return securityError;
   const { actor, supabase, error, status } = await getCrmActor();
   if (!actor) return NextResponse.json({ error }, { status });
+  if (!actor.isAdmin) return NextResponse.json({ error: "Only an admin can access reconciliation." }, { status: 403 });
 
   try {
     const body = await readJsonBody<any>(request);

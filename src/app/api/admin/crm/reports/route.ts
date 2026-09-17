@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
     const [{ data: rawInvoices, error: invoiceError }, { data: rawPayments, error: paymentError }, { data: rawStaff, error: staffError }] = await Promise.all([
       invoiceQuery,
       paymentQuery,
-      supabase.from("users").select("id, name, email").in("role", ["admin", "super_admin"]),
+      supabase.from("users").select("id, name, email").in("role", ["admin", "super_admin", "cleaner", "data_entry"]),
     ]);
     if (invoiceError) return NextResponse.json({ error: invoiceError.message }, { status: 400 });
     if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 400 });

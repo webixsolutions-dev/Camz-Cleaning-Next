@@ -149,7 +149,7 @@ export async function proxy(request: NextRequest) {
 
   const { data: profile } = await supabase
     .from("users")
-    .select("role, is_blocked")
+    .select("role, booking_role_key, is_blocked")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -194,7 +194,22 @@ export async function proxy(request: NextRequest) {
     if (role === "admin") {
       // full access
     } else if (["cleaner", "data_entry"].includes(role)) {
-      if (!path.startsWith("/admin-dashboard/booking-records") && !path.startsWith("/admin-dashboard/before-after")) {
+      const isCalendarPath = path.startsWith("/admin-dashboard/booking-records");
+      const isBeforeAfterPath = path.startsWith("/admin-dashboard/before-after");
+      const isCrmPath = path.startsWith("/admin-dashboard/crm");
+
+      let canAccessCrm = false;
+      if (isCrmPath) {
+        const roleKey = String(profile.booking_role_key || role).toLowerCase();
+        const { data: bookingRole } = await supabase
+          .from("booking_roles")
+          .select("can_access_crm")
+          .eq("key", roleKey)
+          .maybeSingle();
+        canAccessCrm = Boolean(bookingRole?.can_access_crm);
+      }
+
+      if (!isCalendarPath && !isBeforeAfterPath && !(isCrmPath && canAccessCrm)) {
         return forbidden(request);
       }
     } else {

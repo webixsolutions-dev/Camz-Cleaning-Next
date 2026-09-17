@@ -1,12 +1,11 @@
 import CrmReconciliationClient from "@/components/admin/crm/CrmReconciliationClient";
-import { isCrmAdminRole } from "@/lib/crm/staff";
-import { createClient } from "@/lib/supabase/server";
+import { getCrmActor } from "@/lib/crm/staff";
+import { redirect } from "next/navigation";
 
 export default async function CrmReconciliationPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = await supabase.from("users").select("role").eq("id", user?.id || "").maybeSingle();
-  return <CrmReconciliationClient isAdmin={isCrmAdminRole(profile?.role)} />;
+  const { actor } = await getCrmActor();
+  if (!actor?.isAdmin) {
+    redirect("/admin-dashboard/crm");
+  }
+  return <CrmReconciliationClient isAdmin />;
 }

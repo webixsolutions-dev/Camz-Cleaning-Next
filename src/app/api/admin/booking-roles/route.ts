@@ -64,7 +64,7 @@ function slugifyRole(value: string) {
 async function listRoles(admin: AdminClient) {
   const { data, error } = await admin
     .from("booking_roles")
-    .select("key, name, base_role, is_system, created_at")
+    .select("key, name, base_role, is_system, can_access_crm, created_at")
     .order("is_system", { ascending: false })
     .order("name", { ascending: true });
 
@@ -105,6 +105,7 @@ export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
     name?: string;
     base_role?: string;
+    can_access_crm?: boolean;
   };
 
   const name = body.name?.trim();
@@ -141,12 +142,56 @@ export async function POST(request: NextRequest) {
     name,
     base_role: baseRole,
     is_system: false,
+    can_access_crm: Boolean(body.can_access_crm),
   });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
+  return NextResponse.json({ roles: await listRoles(admin) });
+}
+
+export async function PATCH(request: NextRequest) {
+  const securityError = await enforceMutationSecurity(request, { bucket: "booking-roles-patch", limit: 60, windowSeconds: 60 });
+  if (securityError) return securityError;
+
+  const actor = await getAdminActor();
+  if (!actor) {
+    return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+  }
+
+  const admin = getAdminClient();
+  if (!admin) return missingAdminKey();
+
+  const body = (await request.json()) as {
+    key?: string;
+    can_access_crm?: boolean;
+  };
+
+  const key = body.key?.trim().toLowerCase();
+  if (!key || key === "admin") {
+    return NextResponse.json({ error: "Select a valid booking role." }, { status: 400 });
+  }
+  if (typeof body.can_access_crm !== "boolean") {
+    return NextResponse.json({ error: "CRM access value is required." }, { status: 400 });
+  }
+
+  const { data: role, error: roleError } = await admin
+    .from("booking_roles")
+    .select("key")
+    .eq("key", key)
+    .maybeSingle();
+
+  if (roleError) return NextResponse.json({ error: roleError.message }, { status: 400 });
+  if (!role) return NextResponse.json({ error: "Role not found." }, { status: 404 });
+
+  const { error: updateError } = await admin
+    .from("booking_roles")
+    .update({ can_access_crm: body.can_access_crm })
+    .eq("key", key);
+
+  if (updateError) return NextResponse.json({ error: updateError.message }, { status: 400 });
   return NextResponse.json({ roles: await listRoles(admin) });
 }
 

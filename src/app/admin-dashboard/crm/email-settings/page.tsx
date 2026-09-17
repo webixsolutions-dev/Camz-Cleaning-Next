@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 export default async function CrmEmailSettingsPage() {
   const { actor } = await getCrmActor();
 
-  if (!actor) {
+  if (!actor?.isAdmin) {
     redirect("/admin-dashboard/crm");
   }
 

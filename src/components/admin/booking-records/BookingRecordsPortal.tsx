@@ -23,6 +23,7 @@ export type BookingRoleDefinition = {
   name: string;
   base_role: "admin" | "cleaner" | "data_entry";
   is_system: boolean;
+  can_access_crm?: boolean;
   created_at?: string | null;
 };
 
@@ -58,6 +59,15 @@ export type BookingImage = {
   format: string | null;
   uploaded_at: string;
 };
+export type BookingEditHistory = {
+  id: string;
+  actor_id: string | null;
+  actor_name: string;
+  action: string;
+  created_at: string;
+  changed_fields: string[];
+};
+
 export type BookingRecord = {
   id: string;
   full_name: string;
@@ -92,6 +102,11 @@ export type BookingRecord = {
   updated_at: string;
   assigned_cleaners: CleanerUser[];
   service_images: BookingImage[];
+  has_edits?: boolean;
+  last_edited_by?: string | null;
+  last_edited_by_name?: string | null;
+  last_edited_at?: string | null;
+  edit_history?: BookingEditHistory[];
 };
 
 type CurrentUser = { id: string; name: string; role: string } | null;
@@ -120,9 +135,10 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
   const role = currentUser?.role?.toLowerCase() || "admin";
   const isCleaner = role === "cleaner";
   const isDataEntry = role === "data_entry";
-  const canCreate = role === "admin" || isDataEntry;
-  const canEdit = role === "admin";
-  const canAssign = role === "admin";
+  const isAdmin = role === "admin";
+  const canCreate = isAdmin || isDataEntry;
+  const canEdit = isAdmin || isDataEntry;
+  const canAssign = isAdmin || isDataEntry;
   const canDelete = role === "admin";
   const canManageUsers = role === "admin";
   const ownBookings = useMemo(() => {
@@ -280,6 +296,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
             }}
             onSubmit={saveBooking}
             currentUser={currentUser}
+            canAssign={canAssign}
           />
         </div>
       </div>
@@ -626,6 +643,13 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
                   </p>
                 )}
 
+                {isAdmin && booking.has_edits && (
+                  <div className="mt-2 rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-2 text-[8px] font-semibold text-amber-800">
+                    Edited by {booking.last_edited_by_name || "Unknown user"}
+                    {booking.last_edited_at ? ` • ${formatDateTime(booking.last_edited_at)}` : ""}
+                  </div>
+                )}
+
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   <Action
                     onClick={() => setDetails(booking)}
@@ -678,6 +702,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
                     "Price",
                     "Status",
                     ...(!isCleaner ? ["Assigned To"] : []),
+                    ...(isAdmin ? ["Last Edited"] : []),
                     "Actions",
                   ].map((head) => (
                     <th
@@ -757,6 +782,23 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
                       </td>
                     )}
 
+                    {isAdmin && (
+                      <td className="px-3 py-3">
+                        {booking.has_edits ? (
+                          <div className="max-w-[180px]">
+                            <div className="truncate text-[8px] font-bold text-amber-700">
+                              {booking.last_edited_by_name || "Unknown user"}
+                            </div>
+                            <div className="mt-0.5 truncate text-[7px] text-slate-400">
+                              {booking.last_edited_at ? formatDateTime(booking.last_edited_at) : "Edited"}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-[8px] text-slate-300">No edits</span>
+                        )}
+                      </td>
+                    )}
+
                     <td className="whitespace-nowrap px-3 py-3">
                       <div className="flex flex-wrap gap-1">
                         <CompactAction
@@ -796,7 +838,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
                 {!filtered.length && (
                   <tr>
                     <td
-                      colSpan={isCleaner ? 8 : 9}
+                      colSpan={isCleaner ? 8 : isAdmin ? 10 : 9}
                       className="px-4 py-12 text-center text-[10px] text-slate-400"
                     >
                       No bookings match these filters.
@@ -826,6 +868,7 @@ export default function BookingRecordsPortal({ bookings, cleaners, assignedUsers
           booking={details}
           canDelete={canDelete}
           canEdit={canEdit}
+          showAudit={isAdmin}
           onClose={() => setDetails(null)}
           onEdit={() => {
             openEdit(details);
@@ -1175,6 +1218,7 @@ function BookingFormPanel({
   onClose,
   onSubmit,
   currentUser,
+  canAssign,
 }: {
   form: FormState;
   setForm: (form: FormState) => void;
@@ -1184,6 +1228,7 @@ function BookingFormPanel({
   onClose: () => void;
   onSubmit: (event: FormEvent) => void;
   currentUser: CurrentUser;
+  canAssign: boolean;
 }) {
   const update = (
     key: keyof FormState,
@@ -1461,11 +1506,17 @@ function BookingFormPanel({
             </span>
           </label>
 
-          <CleanerPicker
-            cleaners={cleaners}
-            selected={form.assigned_cleaner_ids}
-            onChange={(ids) => update("assigned_cleaner_ids", ids)}
-          />
+          {canAssign ? (
+            <CleanerPicker
+              cleaners={cleaners}
+              selected={form.assigned_cleaner_ids}
+              onChange={(ids) => update("assigned_cleaner_ids", ids)}
+            />
+          ) : (
+            <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5 text-[9px] font-semibold text-amber-800">
+              Cleaner assignment is available to Admin and Data Entry users.
+            </div>
+          )}
         </FormSection>
 
         <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:justify-end">
@@ -1495,7 +1546,7 @@ function BookingFormPanel({
 
 function AssignModal({ booking, cleaners, onClose, onSaved }: { booking: BookingRecord; cleaners: CleanerUser[]; onClose: () => void; onSaved: () => void }) { const [selected, setSelected] = useState(booking.assigned_cleaners.map((cleaner) => cleaner.id)); const [saving, setSaving] = useState(false); const save = async () => { setSaving(true); await fetch("/api/admin/booking-records", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: booking.id, assigned_cleaner_ids: selected }) }); setSaving(false); onSaved(); }; return <Modal title="Assign Cleaner" subtitle={booking.full_name} onClose={onClose}><CleanerPicker cleaners={cleaners} selected={selected} onChange={setSelected} /><div className="mt-6 flex gap-3"><button onClick={save} disabled={saving} className="h-12 flex-1 rounded-xl bg-purple-700 font-bold text-white">{saving ? "Saving..." : "Confirm"}</button><button onClick={onClose} className="h-12 rounded-xl border px-8 font-bold">Cancel</button></div></Modal>; }
 
-function DetailsModal({ booking, canDelete, canEdit, onClose, onEdit, onDeleted }: { booking: BookingRecord; canDelete: boolean; canEdit: boolean; onClose: () => void; onEdit: () => void; onDeleted: () => void }) {
+function DetailsModal({ booking, canDelete, canEdit, showAudit, onClose, onEdit, onDeleted }: { booking: BookingRecord; canDelete: boolean; canEdit: boolean; showAudit: boolean; onClose: () => void; onEdit: () => void; onDeleted: () => void }) {
   const router = useRouter();
   const [status, setStatus] = useState(booking.status);
   const [uploading, setUploading] = useState(false);
@@ -1667,10 +1718,55 @@ function DetailsModal({ booking, canDelete, canEdit, onClose, onEdit, onDeleted 
             <Detail label="Price" value={`$${Number(booking.price || 0).toFixed(2)}`} />
             <Detail label="Assigned To" value={assignedNames} />
             <Detail label="Added By" value={booking.added_by || "Portal User"} />
+            {showAudit && booking.has_edits && (
+              <>
+                <Detail label="Last Edited By" value={booking.last_edited_by_name || "Unknown user"} />
+                <Detail label="Last Edited" value={booking.last_edited_at ? formatDateTime(booking.last_edited_at) : "Edited"} />
+              </>
+            )}
             <Detail label="Show Price" value={booking.show_price_to_cleaner ? "Yes" : "No"} />
             <Detail label="Manpower Time" value={booking.use_manpower_time ? formatManpowerTime(booking) : "Not applied"} />
           </div>
         </section>
+
+        {showAudit && booking.has_edits && (
+          <section className="rounded-xl border border-amber-100 bg-amber-50/40 p-4 shadow-sm">
+            <div className="mb-3 border-b border-amber-100 pb-3">
+              <p className="text-[8px] font-extrabold uppercase tracking-[0.12em] text-amber-700">Edit Audit</p>
+              <h3 className="mt-1 text-[13px] font-bold text-[#13263A]">Booking change history</h3>
+              <p className="mt-1 text-[9px] text-slate-500">Admin view of who changed this booking and which fields were updated.</p>
+            </div>
+
+            <div className="space-y-2">
+              {(booking.edit_history || []).length ? (
+                (booking.edit_history || []).map((entry) => (
+                  <div key={entry.id} className="rounded-lg border border-amber-100 bg-white px-3 py-2.5">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-[9px] font-bold text-[#13263A]">
+                        {entry.actor_name || "Unknown user"}
+                      </div>
+                      <div className="text-[8px] text-slate-400">{formatDateTime(entry.created_at)}</div>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {entry.changed_fields.length ? entry.changed_fields.map((field) => (
+                        <span key={field} className="rounded-md bg-amber-50 px-2 py-1 text-[7px] font-bold text-amber-800">
+                          {humanizeAuditField(field)}
+                        </span>
+                      )) : (
+                        <span className="text-[8px] text-slate-500">Booking updated</span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-amber-100 bg-white px-3 py-2.5 text-[9px] text-slate-600">
+                  Last edited by <b>{booking.last_edited_by_name || "Unknown user"}</b>
+                  {booking.last_edited_at ? ` on ${formatDateTime(booking.last_edited_at)}` : ""}.
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 border-b border-slate-100 pb-3">
@@ -2251,6 +2347,7 @@ function withAdminRole(roles: BookingRoleDefinition[]) {
     name: "Admin",
     base_role: "admin",
     is_system: true,
+    can_access_crm: true,
     created_at: null,
   };
 
@@ -2286,6 +2383,7 @@ function UserEditorForm({
   const [rolesOpen, setRolesOpen] = useState(false);
   const [newRoleName, setNewRoleName] = useState("");
   const [newBaseRole, setNewBaseRole] = useState<"cleaner" | "data_entry">("cleaner");
+  const [newRoleCrmAccess, setNewRoleCrmAccess] = useState(false);
   const [roleBusy, setRoleBusy] = useState(false);
   const [roleError, setRoleError] = useState("");
 
@@ -2304,7 +2402,7 @@ function UserEditorForm({
     const response = await fetch("/api/admin/booking-roles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newRoleName, base_role: newBaseRole }),
+      body: JSON.stringify({ name: newRoleName, base_role: newBaseRole, can_access_crm: newRoleCrmAccess }),
     });
     const result = await response.json();
     setRoleBusy(false);
@@ -2317,6 +2415,25 @@ function UserEditorForm({
     const created = nextRoles.find((role) => role.key === createdKey);
     if (created) setForm({ ...form, role_key: created.key, role: created.base_role });
     setNewRoleName("");
+    setNewRoleCrmAccess(false);
+  };
+
+  const updateRoleCrmAccess = async (role: BookingRoleDefinition, enabled: boolean) => {
+    if (role.key === "admin") return;
+    setRoleBusy(true);
+    setRoleError("");
+    const response = await fetch("/api/admin/booking-roles", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: role.key, can_access_crm: enabled }),
+    });
+    const result = await response.json();
+    setRoleBusy(false);
+    if (!response.ok) {
+      setRoleError(result.error || "Unable to update CRM access.");
+      return;
+    }
+    setRoles(withAdminRole((result.roles || []) as BookingRoleDefinition[]));
   };
 
   const deleteRole = async (role: BookingRoleDefinition) => {
@@ -2363,13 +2480,29 @@ function UserEditorForm({
         <section className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
           <div className="flex items-center justify-between gap-3"><div><h4 className="font-bold text-[#13263A]">Manage Booking Roles</h4><p className="text-xs text-slate-500">Like product categories: add a role, select it, or delete custom roles.</p></div></div>
           {roleError && <p className="mt-3 rounded-lg bg-red-50 p-2.5 text-xs font-semibold text-red-700">{roleError}</p>}
-          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_190px_auto]">
-            <input value={newRoleName} onChange={(event) => setNewRoleName(event.target.value)} placeholder="e.g. Senior Cleaner" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none" />
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_190px_150px_auto]">
+            <input value={newRoleName} onChange={(event) => setNewRoleName(event.target.value)} placeholder="e.g. Data Cleaner" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none" />
             <select value={newBaseRole} onChange={(event) => setNewBaseRole(event.target.value as "cleaner" | "data_entry")} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold"><option value="cleaner">Cleaner Permission</option><option value="data_entry">Data Entry Permission</option></select>
+            <label className="flex h-10 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-700"><span>CRM Access</span><input type="checkbox" checked={newRoleCrmAccess} onChange={(event) => setNewRoleCrmAccess(event.target.checked)} className="h-4 w-4" /></label>
             <button type="button" onClick={addRole} disabled={roleBusy || !newRoleName.trim()} className="h-10 rounded-lg bg-[#4A86F7] px-4 text-xs font-bold text-white disabled:opacity-50"><Plus size={13} className="mr-1 inline" /> Add Role</button>
           </div>
+          <p className="mt-2 text-[10px] text-slate-500">CRM access is inherited by every user assigned to that role/category.</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {roles.map((role) => <div key={role.key} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3"><div className="min-w-0"><div className="truncate text-xs font-bold text-[#13263A]">{role.name}</div><div className="mt-0.5 text-[10px] text-slate-400">{labelRole(role.base_role)} permission</div></div>{role.is_system ? <span className="rounded-md bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-500">Built-in</span> : <button type="button" onClick={() => deleteRole(role)} disabled={roleBusy} className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600"><Trash2 size={13} /></button>}</div>)}
+            {roles.map((role) => (
+              <div key={role.key} className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-bold text-[#13263A]">{role.name}</div>
+                    <div className="mt-0.5 text-[10px] text-slate-400">{labelRole(role.base_role)} permission</div>
+                  </div>
+                  {role.is_system ? <span className="rounded-md bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-500">Built-in</span> : <button type="button" onClick={() => deleteRole(role)} disabled={roleBusy} className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600"><Trash2 size={13} /></button>}
+                </div>
+                <label className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2 text-[10px] font-bold text-slate-700">
+                  <span>CRM Access</span>
+                  <input type="checkbox" checked={role.key === "admin" ? true : Boolean(role.can_access_crm)} disabled={roleBusy || role.key === "admin"} onChange={(event) => updateRoleCrmAccess(role, event.target.checked)} className="h-4 w-4" />
+                </label>
+              </div>
+            ))}
           </div>
         </section>
       )}
@@ -2672,6 +2805,11 @@ function formatTime(time: string) {
   return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
 }
 function formatDateTime(value: string) { return new Date(value).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Edmonton" }); }
+function humanizeAuditField(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 function formatManpowerTime(booking: Pick<BookingRecord, "manpower_min_hours" | "manpower_max_hours">) {
   const min = Number(booking.manpower_min_hours || 0);
   const max = Number(booking.manpower_max_hours || 0);

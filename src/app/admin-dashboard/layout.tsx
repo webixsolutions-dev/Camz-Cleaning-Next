@@ -37,7 +37,7 @@ export default async function AdminDashboardLayout({
 
   const { data: profile } = await supabase
     .from("users")
-    .select("role, is_blocked")
+    .select("role, booking_role_key, is_blocked")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -49,6 +49,19 @@ export default async function AdminDashboardLayout({
     !["admin", "data_entry", "cleaner"].includes(role || "")
   ) {
     redirect("/customer-dashboard");
+  }
+
+  let canAccessCrm = role === "admin";
+  if (!canAccessCrm) {
+    const roleKey = String(profile.booking_role_key || role || "").toLowerCase();
+    if (roleKey) {
+      const { data: crmRole } = await supabase
+        .from("booking_roles")
+        .select("can_access_crm")
+        .eq("key", roleKey)
+        .maybeSingle();
+      canAccessCrm = Boolean(crmRole?.can_access_crm);
+    }
   }
 
   const shell =
@@ -84,7 +97,7 @@ export default async function AdminDashboardLayout({
   return (
     <AuthProvider>
       <div className="admin-dashboard-scope min-h-screen bg-[#F4F7FB]">
-        <AdminSidebar role={role || "admin"} />
+        <AdminSidebar role={role || "admin"} canAccessCrm={canAccessCrm} />
 
         <div className="lg:ml-[236px]">
           {/* DESKTOP HEADER */}
