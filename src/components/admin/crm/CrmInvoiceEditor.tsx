@@ -302,9 +302,20 @@ export default function CrmInvoiceEditor({
           return;
         }
         setInvoice(current);
-        setCustomerId(current.customer_id);
-        setBillingAddressId(current.billing_address_id || "");
-        setServiceAddressId(current.service_address_id || "");
+        const requestedCustomer = initialCustomerId
+          ? loadedCustomers.find((row) => row.id === initialCustomerId)
+          : undefined;
+        const useRequestedCustomer = current.status === "draft" && Boolean(requestedCustomer);
+        if (useRequestedCustomer && requestedCustomer) {
+          const requestedAddresses = requestedCustomer.crm_customer_addresses || [];
+          setCustomerId(requestedCustomer.id);
+          setBillingAddressId(requestedAddresses.find((address) => address.is_billing)?.id || "");
+          setServiceAddressId(requestedAddresses.find((address) => address.is_service)?.id || "");
+        } else {
+          setCustomerId(current.customer_id);
+          setBillingAddressId(current.billing_address_id || "");
+          setServiceAddressId(current.service_address_id || "");
+        }
         setInvoiceDate(current.invoice_date || today());
         setServiceDate(current.service_date || "");
         setDueDate(current.due_date || "");
@@ -316,7 +327,9 @@ export default function CrmInvoiceEditor({
         setShowDiscountReason(parsedReason.show);
         setTaxEnabled(current.tax_enabled !== false);
         setTaxRatePercent(String(Number(current.tax_rate_bps || 0) / 100));
-        const customerEmail = current.crm_customers?.email || "";
+        const customerEmail = useRequestedCustomer
+          ? requestedCustomer?.email || ""
+          : current.crm_customers?.email || "";
         setSendEmail(isDeliverableEmail(customerEmail) ? customerEmail : sendEmail);
         if (!paymentAmount && current.balance_cents > 0) {
           setPaymentAmount(centsToDollars(current.balance_cents));
@@ -800,10 +813,15 @@ export default function CrmInvoiceEditor({
                     if (!nextOpen) setCustomerSearch("");
                   }}
                 >
-                  <span className="min-w-0 truncate">
-                    {selectedCustomer
-                      ? `${selectedCustomer.customer_code ? `#${selectedCustomer.customer_code} · ` : ""}${selectedCustomer.display_name}`
-                      : "Select customer"}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate">
+                      {selectedCustomer
+                        ? `${selectedCustomer.customer_code ? `#${selectedCustomer.customer_code} · ` : ""}${selectedCustomer.display_name}`
+                        : "Select customer"}
+                    </span>
+                    {selectedCustomer && !selectedCustomer.user_id ? (
+                      <span className="shrink-0 rounded-md bg-amber-50 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-700">Offline Customer</span>
+                    ) : null}
                   </span>
                   <ChevronDown size={16} className={`shrink-0 transition-transform ${customerMenuOpen ? "rotate-180" : ""}`} />
                 </button>
@@ -811,7 +829,7 @@ export default function CrmInvoiceEditor({
                 {customerMenuOpen && draft ? (
                   <div
                     role="listbox"
-                    className="absolute left-0 right-0 top-full z-[100] mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1.5 text-[13px] font-medium normal-case tracking-normal text-slate-700 shadow-[0_18px_45px_rgba(15,23,42,0.18)]"
+                    className="absolute left-0 right-0 top-full z-[100] mt-2 max-h-[min(22rem,58vh)] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white py-1.5 text-[13px] font-medium normal-case tracking-normal text-slate-700 shadow-[0_18px_45px_rgba(15,23,42,0.18)]"
                   >
                     <div className="sticky top-0 z-10 border-b border-slate-100 bg-white px-2.5 py-2">
                       <input
@@ -823,6 +841,19 @@ export default function CrmInvoiceEditor({
                         autoFocus
                         className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#4A86F7] focus:bg-white focus:ring-2 focus:ring-[#4A86F7]/10"
                       />
+                      <button
+                        type="button"
+                        className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[#4A86F7] px-3 text-[12px] font-bold text-white transition hover:bg-[#3675e7]"
+                        onClick={() => {
+                          setCustomerMenuOpen(false);
+                          setCustomerSearch("");
+                          const returnTo = window.location.pathname;
+                          router.push(`/admin-dashboard/crm/customers?new=1&returnTo=${encodeURIComponent(returnTo)}`);
+                        }}
+                      >
+                        <Plus size={14} />
+                        Add new customer
+                      </button>
                     </div>
                     <button
                       type="button"
@@ -852,8 +883,15 @@ export default function CrmInvoiceEditor({
                             setCustomerSearch("");
                           }}
                         >
-                          {customer.customer_code ? `#${customer.customer_code} · ` : ""}
-                          {customer.display_name}
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 truncate">
+                              {customer.customer_code ? `#${customer.customer_code} · ` : ""}
+                              {customer.display_name}
+                            </span>
+                            {!customer.user_id ? (
+                              <span className="shrink-0 rounded-md bg-amber-50 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-700">Offline Customer</span>
+                            ) : null}
+                          </span>
                         </button>
                       );
                     })}

@@ -310,7 +310,7 @@ const invoiceCss = `
   .page { padding: 24px; overflow-x: hidden; }
   .sheet {
     position: relative;
-    width: 816px;
+    width: min(816px, 100%);
     min-height: 1056px;
     max-width: 100%;
     margin: 0 auto;
@@ -348,7 +348,11 @@ const invoiceCss = `
   .small-label { margin-top: 9px !important; font-size: 11px !important; color: #6b7280 !important; }
   table { width: 100%; border-collapse: collapse; }
   .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .items { margin-top: 3px; }
+  .items { margin-top: 3px; table-layout: fixed; }
+  .items th:first-child, .items td:first-child { width: 46%; padding-right: 14px; overflow-wrap: anywhere; }
+  .items th:nth-child(2), .items td:nth-child(2) { width: 14%; }
+  .items th:nth-child(3), .items td:nth-child(3) { width: 20%; }
+  .items th:nth-child(4), .items td:nth-child(4) { width: 20%; }
   .items thead { border-top: 1px solid #cbd1d6; border-bottom: 1px solid #cbd1d6; }
   .items th { text-align: left; font-size: 13px; font-weight: 700; padding: 13px 0 13px; }
   .items td { padding: 17px 0; border-bottom: 1px solid #cbd1d6; font-size: 13px; line-height: 1.35; vertical-align: top; }
@@ -375,8 +379,8 @@ const invoiceCss = `
   }
   .page-number { margin-left: auto; font-size: 11px; color: #8b95a1; white-space: nowrap; }
   @media (max-width: 700px) {
-    .page { padding: 12px; }
-    .sheet { width: 100%; min-height: 0; padding: 24px 18px 34px; box-shadow: none; }
+    .page { padding: 8px; }
+    .sheet { width: 100%; min-height: 0; padding: 22px 14px 30px; box-shadow: none; }
     .letterhead { grid-template-columns: 1fr; }
     .meta { min-width: 0; text-align: left; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; }
     .invoice-meta { grid-column: 1 / -1; }
@@ -386,7 +390,13 @@ const invoiceCss = `
     .rule { margin: 20px 0 24px; height: 5px; }
     h1 { font-size: 25px; margin-bottom: 24px; }
     .summary { grid-template-columns: 1fr; gap: 18px; }
-    .items th, .items td, .payments th, .payments td { font-size: 12px; }
+    .items th, .items td, .payments th, .payments td { font-size: 11px; }
+    .items th, .items td { padding-left: 3px; padding-right: 3px; }
+    .items th:first-child, .items td:first-child { width: 43%; padding-left: 0; padding-right: 8px; }
+    .items th:nth-child(2), .items td:nth-child(2) { width: 15%; }
+    .items th:nth-child(3), .items td:nth-child(3) { width: 21%; }
+    .items th:nth-child(4), .items td:nth-child(4) { width: 21%; }
+    .num { white-space: normal; overflow-wrap: anywhere; }
     .total td, .balance td { font-size: 18px; }
     .page-footer { position: static; margin-top: 44px; }
     .void { font-size: 28px; letter-spacing: 6px; }

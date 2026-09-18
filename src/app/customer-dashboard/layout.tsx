@@ -50,10 +50,10 @@ export default async function CustomerDashboardLayout({
       <div className="customer-dashboard-scope min-h-screen bg-[#F4F7FB]">
         <DashboardSidebar />
 
-        <div className="lg:ml-[236px]">
+        <div className="min-w-0 lg:ml-[236px]">
           <DashboardHeader />
 
-          <main className="min-h-[calc(100vh-68px)] bg-[#F4F7FB]">
+          <main className="min-h-[calc(100vh-68px)] min-w-0 overflow-x-hidden bg-[#F4F7FB]">
             {children}
           </main>
         </div>

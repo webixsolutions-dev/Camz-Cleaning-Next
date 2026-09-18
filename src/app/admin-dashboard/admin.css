@@ -37,3 +37,56 @@
   font-size: 11px !important;
   line-height: 1.4 !important;
 }
+
+/* Responsive containment for all admin pages */
+.admin-dashboard-scope,
+.admin-dashboard-scope main {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Do not force forms/sections to max-width:100%.
+   Components such as centered CRM modals rely on their own max-width. */
+.admin-dashboard-scope section,
+.admin-dashboard-scope article,
+.admin-dashboard-scope form {
+  min-width: 0;
+}
+
+.admin-dashboard-scope img,
+.admin-dashboard-scope video,
+.admin-dashboard-scope canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 1023px) {
+  .admin-dashboard-scope table {
+    max-width: 100%;
+  }
+
+  .admin-dashboard-scope .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-dashboard-scope h1 {
+    font-size: 21px !important;
+  }
+
+  .admin-dashboard-scope h2 {
+    font-size: 17px !important;
+  }
+
+  .admin-dashboard-scope h3 {
+    font-size: 14px !important;
+  }
+
+  .admin-dashboard-scope input,
+  .admin-dashboard-scope select,
+  .admin-dashboard-scope textarea {
+    font-size: 16px;
+  }
+}

@@ -99,7 +99,7 @@ export default async function AdminDashboardLayout({
       <div className="admin-dashboard-scope min-h-screen bg-[#F4F7FB]">
         <AdminSidebar role={role || "admin"} canAccessCrm={canAccessCrm} />
 
-        <div className="lg:ml-[236px]">
+        <div className="min-w-0 lg:ml-[236px]">
           {/* DESKTOP HEADER */}
           <header className="admin-dashboard-header sticky top-0 z-30 hidden h-[68px] items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm lg:flex">
             <div>
@@ -130,7 +130,7 @@ export default async function AdminDashboardLayout({
           </header>
 
           {/* PAGE CONTENT */}
-          <main className="min-h-[calc(100vh-68px)] bg-[#F4F7FB]">
+          <main className="min-h-[calc(100vh-68px)] min-w-0 overflow-x-hidden bg-[#F4F7FB]">
             {children}
           </main>
         </div>

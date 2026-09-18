@@ -75,12 +75,12 @@ export default function CrmInvoicePdfPreview({ invoiceId }: { invoiceId: string 
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#eef2f6]">
-      <div className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 sm:px-6 sm:py-4">
+      <div className="sticky top-0 z-10 flex flex-col items-stretch justify-end gap-3 border-b border-slate-200 bg-white/95 px-3 py-3 sm:flex-row sm:items-center sm:px-6 sm:py-4">
         <button
           type="button"
           disabled={loading || downloading || !sheetHtml}
           onClick={() => void downloadPdf()}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#4A86F7] px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:px-5"
+          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#4A86F7] px-4 text-[13px] font-bold text-white disabled:opacity-50 sm:w-auto sm:px-5"
         >
           {downloading ? <LoaderCircle size={16} className="animate-spin" /> : <Download size={16} />}
           {downloading ? "Preparing PDF..." : "Download PDF"}

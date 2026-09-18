@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Building2,
+  ChevronDown,
   Edit3,
   FileText,
   Mail,
@@ -13,6 +15,7 @@ import {
   Plus,
   Search,
   StickyNote,
+  User,
   Users,
   Wallet,
   X,
@@ -157,7 +160,15 @@ async function readApi(response: Response) {
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
+function invoiceReturnPath() {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const returnTo = params.get("returnTo");
+  return returnTo?.startsWith("/admin-dashboard/crm/invoices") ? returnTo : null;
+}
+
 export default function CrmCustomersClient() {
+  const router = useRouter();
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -208,8 +219,15 @@ export default function CrmCustomersClient() {
   }, []);
 
   useEffect(() => {
-    const customerId = new URLSearchParams(window.location.search).get("customer");
+    const params = new URLSearchParams(window.location.search);
+    const customerId = params.get("customer");
     if (customerId) void loadDetail(customerId);
+    if (params.get("new") === "1") {
+      setEditingId(null);
+      setForm(blankCustomer);
+      setDuplicates([]);
+      setCustomerModal(true);
+    }
   }, []);
 
   const filtered = useMemo(() => {
@@ -246,6 +264,15 @@ export default function CrmCustomersClient() {
     });
     setDuplicates([]);
     setCustomerModal(true);
+  };
+
+  const closeCustomerForm = () => {
+    setCustomerModal(false);
+    setDuplicates([]);
+    const returnTo = invoiceReturnPath();
+    if (returnTo) {
+      router.replace(returnTo);
+    }
   };
 
   const saveCustomer = async (event?: FormEvent, confirmDuplicate = false) => {
@@ -297,6 +324,14 @@ export default function CrmCustomersClient() {
       const saved = payload.customer as CrmCustomer;
       setCustomerModal(false);
       setDuplicates([]);
+
+      const returnTo = invoiceReturnPath();
+      if (!editingId && saved?.id && returnTo) {
+        const separator = returnTo.includes("?") ? "&" : "?";
+        router.replace(`${returnTo}${separator}customer=${encodeURIComponent(saved.id)}`);
+        return;
+      }
+
       await load();
       if (saved?.id) await loadDetail(saved.id);
     } catch (err) {
@@ -408,7 +443,10 @@ export default function CrmCustomersClient() {
               {filtered.map((customer) => (
                 <button key={customer.id} type="button" onClick={() => void loadDetail(customer.id)} className="block w-full p-4 text-left">
                   <p className="font-mono text-[12px] font-bold text-[#4A86F7]">{customer.customer_code || "—"}</p>
-                  <p className="mt-1 font-semibold text-slate-800">{customer.display_name}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-slate-800">{customer.display_name}</p>
+                    {!customer.user_id ? <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-700">Offline Customer</span> : null}
+                  </div>
                   <p className="mt-1 break-all text-[13px] text-slate-600">{customer.email || customer.phone || "—"}</p>
                   <p className="mt-1 text-[13px] text-slate-500">{addressText(customer.crm_customer_addresses?.[0])}</p>
                 </button>
@@ -423,7 +461,12 @@ export default function CrmCustomersClient() {
                   {filtered.map((customer) => (
                     <tr key={customer.id} className="border-t border-slate-100">
                       <td className="px-4 py-3 font-mono font-bold text-[#4A86F7]">{customer.customer_code || "—"}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">{customer.display_name}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">
+                        <div className="flex items-center gap-2">
+                          <span>{customer.display_name}</span>
+                          {!customer.user_id ? <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-700">Offline Customer</span> : null}
+                        </div>
+                      </td>
                       <td className="px-4 py-3">{customer.email || "—"}</td>
                       <td className="px-4 py-3">{customer.phone || "—"}</td>
                       <td className="max-w-[260px] truncate px-4 py-3">{addressText(customer.crm_customer_addresses?.[0])}</td>
@@ -443,7 +486,7 @@ export default function CrmCustomersClient() {
             {detailLoading && !detail ? <p className="p-8 text-slate-500">Loading customer profile...</p> : detail ? (
               <>
                 <div className="mb-5 flex items-start justify-between gap-3">
-                  <div><p className="font-mono text-[12px] font-bold text-[#4A86F7]">{detail.customer.customer_code || "Customer"}</p><h2 className="mt-1 text-slate-900">{detail.customer.display_name}</h2><p className="mt-1 text-[13px] text-slate-500">{detail.customer.legal_name || "Customer profile"}</p></div>
+                  <div><p className="font-mono text-[12px] font-bold text-[#4A86F7]">{detail.customer.customer_code || "Customer"}</p><div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-slate-900">{detail.customer.display_name}</h2>{!detail.customer.user_id ? <span className="rounded-md bg-amber-50 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wide text-amber-700">Offline Customer</span> : null}</div><p className="mt-1 text-[13px] text-slate-500">{detail.customer.legal_name || "Customer profile"}</p></div>
                   <div className="flex gap-2"><button type="button" onClick={openEdit} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-bold"><Edit3 size={14} /> Edit</button><button type="button" onClick={() => setDetail(null)} className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white"><X size={17} /></button></div>
                 </div>
 
@@ -518,37 +561,159 @@ export default function CrmCustomersClient() {
       ) : null}
 
       {customerModal ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 sm:items-center sm:p-4">
-          <form onSubmit={(event) => void saveCustomer(event)} className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
-            <div className="flex items-center justify-between"><h2 className="text-slate-900">{editingId ? "Edit customer" : "New CRM customer"}</h2><button type="button" onClick={() => setCustomerModal(false)}><X size={18} /></button></div>
-            <p className="mt-1 text-[12px] text-slate-500">Name and at least one contact method are required. Email is only required when sending an invoice.</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="text-[11px] font-semibold text-slate-500">Name *<input className={`${fieldClass} mt-1`} value={form.display_name} onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))} required /></label>
-              <label className="text-[11px] font-semibold text-slate-500">Legal/company name<input className={`${fieldClass} mt-1`} value={form.legal_name} onChange={(event) => setForm((current) => ({ ...current, legal_name: event.target.value }))} /></label>
-              <label className="text-[11px] font-semibold text-slate-500">Email<input className={`${fieldClass} mt-1`} type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></label>
-              <label className="text-[11px] font-semibold text-slate-500">Phone<input className={`${fieldClass} mt-1`} value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} /></label>
-              <label className="sm:col-span-2 text-[11px] font-semibold text-slate-500">Customer-visible CRM note<textarea className="mt-1 min-h-20 w-full rounded-xl border border-slate-200 bg-[#F8FAFD] p-3 text-[13px] outline-none" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} /></label>
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-[1px]"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeCustomerForm();
+          }}
+        >
+          <form
+            onSubmit={(event) => void saveCustomer(event)}
+            className="overflow-y-auto border border-slate-200 bg-white shadow-2xl"
+            style={{
+              width: "min(860px, calc(100vw - 32px))",
+              maxWidth: "860px",
+              maxHeight: "calc(100dvh - 32px)",
+              padding: "28px 30px 30px",
+              margin: "auto",
+              borderRadius: "20px",
+            }}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <p className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-[#4A86F7]">
+                  Customer
+                </p>
+                <h2 className="mt-1 text-[27px] font-extrabold leading-tight text-[#13263A]">
+                  {editingId ? "Edit Customer" : "Add New Customer"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close customer form"
+                onClick={closeCustomerForm}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {error ? (
+              <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] font-medium text-rose-700">
+                {error}
+              </p>
+            ) : null}
+
+            <div className="mt-6 space-y-4">
+              <label className="block">
+                <span className="mb-2 block text-[12px] font-bold text-slate-600">Full Name</span>
+                <div className="relative">
+                  <User size={18} className="pointer-events-none absolute z-10 text-[#91A6C6]" style={{ left: "19px", top: "50%", transform: "translateY(-50%)", color: "#91A6C6" }} />
+                  <input
+                    className="w-full rounded-xl border border-[#D6E0EE] bg-slate-50 text-sm font-semibold text-slate-700 outline-none transition placeholder:font-semibold placeholder:text-[#98A9C2] focus:border-[#4A86F7] focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    style={{ height: "60px", paddingLeft: "54px", paddingRight: "18px" }}
+                    placeholder="John Doe"
+                    value={form.display_name}
+                    onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
+                    required
+                  />
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-[12px] font-bold text-slate-600">Email Address</span>
+                <div className="relative">
+                  <Mail size={18} className="pointer-events-none absolute z-10 text-[#91A6C6]" style={{ left: "19px", top: "50%", transform: "translateY(-50%)", color: "#91A6C6" }} />
+                  <input
+                    className="w-full rounded-xl border border-[#D6E0EE] bg-slate-50 text-sm font-semibold text-slate-700 outline-none transition placeholder:font-semibold placeholder:text-[#98A9C2] focus:border-[#4A86F7] focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    style={{ height: "60px", paddingLeft: "54px", paddingRight: "18px" }}
+                    type="email"
+                    placeholder="john@example.com"
+                    value={form.email}
+                    onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  />
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-[12px] font-bold text-slate-600">Phone Number</span>
+                <div className="relative">
+                  <Phone size={18} className="pointer-events-none absolute z-10 text-[#91A6C6]" style={{ left: "19px", top: "50%", transform: "translateY(-50%)", color: "#91A6C6" }} />
+                  <input
+                    className="w-full rounded-xl border border-[#D6E0EE] bg-slate-50 text-sm font-semibold text-slate-700 outline-none transition placeholder:font-semibold placeholder:text-[#98A9C2] focus:border-[#4A86F7] focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    style={{ height: "60px", paddingLeft: "54px", paddingRight: "18px" }}
+                    type="tel"
+                    placeholder="+1 234 567 890"
+                    value={form.phone}
+                    onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+                  />
+                </div>
+              </label>
+
               {!editingId ? (
-                <>
-                  <p className="sm:col-span-2 mt-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Optional primary address</p>
-                  <label className="sm:col-span-2 text-[11px] font-semibold text-slate-500">
-                    Street address
+                <label className="block">
+                  <span className="mb-2 block text-[12px] font-bold text-slate-600">Address</span>
+                  <div className="relative">
+                    <MapPin size={18} className="pointer-events-none absolute z-20 text-[#91A6C6]" style={{ left: "19px", top: "30px", transform: "translateY(-50%)", color: "#91A6C6" }} />
                     <CrmAddressAutocomplete
                       value={form.line1}
-                      inputClassName={`${fieldClass} mt-1 pr-10`}
+                      inputClassName="w-full rounded-xl border border-[#D6E0EE] bg-slate-50 text-sm font-semibold text-slate-700 outline-none transition placeholder:font-semibold placeholder:text-[#98A9C2] focus:border-[#4A86F7] focus:bg-white focus:ring-4 focus:ring-blue-100"
+                      inputStyle={{ height: "60px", paddingLeft: "54px", paddingRight: "46px" }}
+                      placeholder="123 Main St, Calgary"
                       onChange={(line1) => setForm((current) => ({ ...current, line1 }))}
                       onSelect={(address: GoogleAddressSelection) => setForm((current) => ({ ...current, ...address }))}
                     />
-                  </label>
-                  <input className={fieldClass} placeholder="Unit / suite" value={form.unit || form.line2} onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value, line2: event.target.value }))} />
-                  <input className={fieldClass} placeholder="City" value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} />
-                  <input className={fieldClass} placeholder="Province" value={form.province} onChange={(event) => setForm((current) => ({ ...current, province: event.target.value }))} />
-                  <input className={fieldClass} placeholder="Postal code" value={form.postal_code} onChange={(event) => setForm((current) => ({ ...current, postal_code: event.target.value }))} />
-                </>
+                  </div>
+                </label>
               ) : null}
+
+              <label className="block">
+                <span className="mb-2 block text-[12px] font-bold text-slate-600">Acquisition Source</span>
+                <div className="relative">
+                  <select
+                    value="Manual"
+                    disabled
+                    className="h-[60px] w-full appearance-none rounded-xl border border-[#D6E0EE] bg-slate-50 px-6 text-sm font-semibold text-slate-700 outline-none disabled:cursor-default disabled:opacity-100"
+                  >
+                    <option>Manual</option>
+                  </select>
+                  <ChevronDown size={18} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                </div>
+              </label>
+
+
+              {duplicates.length ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="flex items-center gap-2 text-[13px] font-bold text-amber-900"><AlertTriangle size={16} /> Possible duplicate customer</p>
+                  {duplicates.map((item) => (
+                    <p key={item.id} className="mt-2 text-[12px] text-amber-800">
+                      {item.customer_code ? `#${item.customer_code} · ` : ""}{item.display_name} · {item.email || item.phone}
+                    </p>
+                  ))}
+                  <p className="mt-2 text-[11px] text-amber-700">The existing record will not be changed or merged.</p>
+                </div>
+              ) : null}
+
+              {duplicates.length ? (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void saveCustomer(undefined, true)}
+                  className="flex h-[60px] w-full items-center justify-center rounded-xl bg-amber-600 px-5 text-sm font-extrabold text-white transition hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : "Create Separate Record"}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={saving || !form.display_name.trim() || (!form.email.trim() && !form.phone.trim())}
+                  className="flex h-[60px] w-full items-center justify-center rounded-xl bg-[#4A86F7] px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-[#3978e8] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : editingId ? "Update Customer" : "Save Customer"}
+                </button>
+              )}
             </div>
-            {duplicates.length ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="flex items-center gap-2 text-[13px] font-bold text-amber-900"><AlertTriangle size={16} /> Possible duplicate customer</p>{duplicates.map((item) => <p key={item.id} className="mt-2 text-[12px] text-amber-800">{item.customer_code ? `#${item.customer_code} · ` : ""}{item.display_name} · {item.email || item.phone}</p>)}<p className="mt-2 text-[11px] text-amber-700">The existing record will not be changed or merged.</p></div> : null}
-            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setCustomerModal(false)} className="h-10 rounded-xl border px-4 text-[12px] font-bold">Cancel</button>{duplicates.length ? <button type="button" disabled={saving} onClick={() => void saveCustomer(undefined, true)} className="h-10 rounded-xl bg-amber-600 px-4 text-[12px] font-bold text-white">Create separate record</button> : <button type="submit" disabled={saving || !form.display_name.trim() || (!form.email.trim() && !form.phone.trim())} className="h-10 rounded-xl bg-[#4A86F7] px-4 text-[12px] font-bold text-white disabled:opacity-50">{saving ? "Saving..." : "Save customer"}</button>}</div>
           </form>
         </div>
       ) : null}

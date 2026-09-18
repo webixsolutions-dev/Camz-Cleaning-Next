@@ -62,3 +62,56 @@ p {
 .btn-secondary {
   @apply px-6 py-3 rounded-xl font-medium inline-flex items-center justify-center transition duration-200 bg-[var(--btn-color)] text-white hover:opacity-90;
 }
+
+
+/* Global responsive safety net */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+input,
+select,
+textarea,
+button {
+  min-width: 0;
+}
+
+pre,
+code {
+  max-width: 100%;
+}
+
+pre {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  h1 {
+    font-size: clamp(1.75rem, 8vw, 2.25rem);
+  }
+
+  h2 {
+    font-size: clamp(1.5rem, 7vw, 2rem);
+    line-height: 1.2;
+  }
+
+  h3 {
+    font-size: clamp(1.125rem, 5vw, 1.5rem);
+  }
+
+  .container-custom {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}

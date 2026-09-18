@@ -31,3 +31,41 @@
   font-size: 11px !important;
   line-height: 1.4 !important;
 }
+
+
+/* Responsive containment for all customer dashboard pages */
+.customer-dashboard-scope,
+.customer-dashboard-scope main,
+.customer-dashboard-scope section,
+.customer-dashboard-scope article,
+.customer-dashboard-scope form {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.customer-dashboard-scope img,
+.customer-dashboard-scope video,
+.customer-dashboard-scope canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 640px) {
+  .customer-dashboard-scope h1 {
+    font-size: 21px !important;
+  }
+
+  .customer-dashboard-scope h2 {
+    font-size: 17px !important;
+  }
+
+  .customer-dashboard-scope h3 {
+    font-size: 14px !important;
+  }
+
+  .customer-dashboard-scope input,
+  .customer-dashboard-scope select,
+  .customer-dashboard-scope textarea {
+    font-size: 16px;
+  }
+}

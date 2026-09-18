@@ -1,7 +1,7 @@
 "use client";
 
 import { MapPin, Search } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 export type GoogleAddressSelection = {
   formatted_address: string;
@@ -34,6 +34,7 @@ type Props = {
   disabled?: boolean;
   required?: boolean;
   inputClassName: string;
+  inputStyle?: CSSProperties;
   placeholder?: string;
 };
 
@@ -50,6 +51,7 @@ export default function CrmAddressAutocomplete({
   disabled = false,
   required = false,
   inputClassName,
+  inputStyle,
   placeholder = "Start typing an address",
 }: Props) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -136,6 +138,7 @@ export default function CrmAddressAutocomplete({
       <div className="relative">
         <input
           className={inputClassName}
+          style={inputStyle}
           value={typedValue}
           disabled={disabled}
           required={required}
