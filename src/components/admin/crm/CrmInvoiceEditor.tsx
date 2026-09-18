@@ -199,10 +199,35 @@ export default function CrmInvoiceEditor({
   const [duplicateInvoices, setDuplicateInvoices] = useState<Array<{ id: string; invoice_number: string | null; invoice_date: string; total_cents: number }>>([]);
   const lastSavedFingerprint = useRef("");
   const saveInFlightRef = useRef(false);
+  const [customerMenuOpen, setCustomerMenuOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const customerMenuRef = useRef<HTMLDivElement | null>(null);
 
   const draft = !invoice || invoice.status === "draft";
   const issued = Boolean(invoice && invoice.status !== "draft" && !invoice.is_void);
   const selectedCustomer = customers.find((row) => row.id === customerId);
+  const filteredCustomers = useMemo(() => {
+    const query = customerSearch.trim().toLowerCase();
+    if (!query) return customers;
+
+    return customers.filter((customer) =>
+      [customer.customer_code, customer.display_name, customer.legal_name, customer.email, customer.phone]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query)),
+    );
+  }, [customerSearch, customers]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!customerMenuRef.current?.contains(event.target as Node)) {
+        setCustomerMenuOpen(false);
+        setCustomerSearch("");
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
 
   const updateLine = (index: number, patch: Partial<Line>) => {
     setLines((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
@@ -761,24 +786,83 @@ export default function CrmInvoiceEditor({
 
           <div className="space-y-5 p-4 sm:p-6">
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Customer
-                <select
-                  className={`${fieldClass} mt-1.5`}
-                  value={customerId}
+              <div ref={customerMenuRef} className="relative block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <span>Customer</span>
+                <button
+                  type="button"
+                  className={`${fieldClass} mt-1.5 flex items-center justify-between gap-3 text-left normal-case tracking-normal disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400`}
                   disabled={!draft}
-                  onChange={(event) => chooseCustomer(event.target.value)}
-                  required
+                  aria-haspopup="listbox"
+                  aria-expanded={customerMenuOpen}
+                  onClick={() => {
+                    const nextOpen = !customerMenuOpen;
+                    setCustomerMenuOpen(nextOpen);
+                    if (!nextOpen) setCustomerSearch("");
+                  }}
                 >
-                  <option value="">Select customer</option>
-                  {customers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.customer_code ? `#${customer.customer_code} · ` : ""}
-                      {customer.display_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <span className="min-w-0 truncate">
+                    {selectedCustomer
+                      ? `${selectedCustomer.customer_code ? `#${selectedCustomer.customer_code} · ` : ""}${selectedCustomer.display_name}`
+                      : "Select customer"}
+                  </span>
+                  <ChevronDown size={16} className={`shrink-0 transition-transform ${customerMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {customerMenuOpen && draft ? (
+                  <div
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full z-[100] mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1.5 text-[13px] font-medium normal-case tracking-normal text-slate-700 shadow-[0_18px_45px_rgba(15,23,42,0.18)]"
+                  >
+                    <div className="sticky top-0 z-10 border-b border-slate-100 bg-white px-2.5 py-2">
+                      <input
+                        type="search"
+                        value={customerSearch}
+                        onChange={(event) => setCustomerSearch(event.target.value)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        placeholder="Search customer..."
+                        autoFocus
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#4A86F7] focus:bg-white focus:ring-2 focus:ring-[#4A86F7]/10"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={!customerId}
+                      className="block w-full px-4 py-2.5 text-left hover:bg-slate-50"
+                      onClick={() => {
+                        chooseCustomer("");
+                        setCustomerMenuOpen(false);
+                        setCustomerSearch("");
+                      }}
+                    >
+                      Select customer
+                    </button>
+                    {filteredCustomers.map((customer) => {
+                      const isSelected = customer.id === customerId;
+                      return (
+                        <button
+                          key={customer.id}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={`block w-full px-4 py-2.5 text-left transition ${isSelected ? "bg-[#4A86F7]/10 text-[#245fc7]" : "hover:bg-slate-50"}`}
+                          onClick={() => {
+                            chooseCustomer(customer.id);
+                            setCustomerMenuOpen(false);
+                            setCustomerSearch("");
+                          }}
+                        >
+                          {customer.customer_code ? `#${customer.customer_code} · ` : ""}
+                          {customer.display_name}
+                        </button>
+                      );
+                    })}
+                    {filteredCustomers.length === 0 ? (
+                      <div className="px-4 py-3 text-center text-[12px] font-medium text-slate-400">No customers found</div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Invoice date
                 <input className={`${fieldClass} mt-1.5`} type="date" value={invoiceDate} disabled={!draft} onChange={(event) => setInvoiceDate(event.target.value)} />
