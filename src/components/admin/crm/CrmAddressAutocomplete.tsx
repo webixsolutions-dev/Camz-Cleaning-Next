@@ -57,8 +57,6 @@ export default function CrmAddressAutocomplete({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [providerAvailable, setProviderAvailable] = useState(true);
-  const [message, setMessage] = useState("");
   const [typedValue, setTypedValue] = useState(value);
   const sessionToken = useRef(newSessionToken());
   const skipNextLookup = useRef(false);
@@ -89,15 +87,12 @@ export default function CrmAddressAutocomplete({
         );
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || "Address suggestions unavailable.");
-        setProviderAvailable(payload.configured !== false);
         setSuggestions(payload.suggestions || []);
-        setMessage(payload.configured === false ? payload.error || "Manual entry is available." : "");
         setOpen(Boolean(payload.suggestions?.length));
       } catch (err) {
         if (controller.signal.aborted) return;
         setSuggestions([]);
         setOpen(false);
-        setMessage(err instanceof Error ? err.message : "Address suggestions unavailable. Use manual entry.");
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -124,9 +119,7 @@ export default function CrmAddressAutocomplete({
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.address) throw new Error(payload.error || "Address details unavailable.");
       onSelect(payload.address as GoogleAddressSelection);
-      setMessage("");
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Keep the selected text and complete the address manually.");
     } finally {
       setLoading(false);
       sessionToken.current = newSessionToken();
@@ -153,8 +146,7 @@ export default function CrmAddressAutocomplete({
             const next = event.target.value;
             setTypedValue(next);
             onChange(next);
-            setMessage("");
-          }}
+                }}
         />
         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
           {loading ? <span className="block h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-[#4A86F7]" /> : <Search size={15} />}
@@ -183,8 +175,6 @@ export default function CrmAddressAutocomplete({
         </div>
       ) : null}
 
-      {message ? <p className="mt-1 text-[11px] text-amber-700">{message}</p> : null}
-      {!providerAvailable ? <p className="mt-1 text-[10px] text-slate-400">You can continue typing the address manually.</p> : null}
     </div>
   );
 }
