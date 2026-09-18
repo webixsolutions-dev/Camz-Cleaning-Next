@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       invoiceQuery,
       paymentQuery,
       eventQuery,
-      supabase.from("users").select("id, name, email").in("role", ["admin", "super_admin", "cleaner", "data_entry"]),
+      supabase.from("users").select("id, name, email").in("role", ["admin", "cleaner", "data_entry"]),
     ]);
     if (invoiceError) return NextResponse.json({ error: invoiceError.message }, { status: 400 });
     if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 400 });

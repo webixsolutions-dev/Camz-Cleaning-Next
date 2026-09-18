@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
         .lte("received_at", `${to}T23:59:59.999Z`)
         .order("received_at", { ascending: false }),
       supabase.from("crm_reconciliation").select("*").order("created_at", { ascending: false }),
-      supabase.from("users").select("id, name, email").in("role", ["admin", "super_admin", "cleaner", "data_entry"]),
+      supabase.from("users").select("id, name, email").in("role", ["admin", "cleaner", "data_entry"]),
     ]);
     if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 400 });
     if (reconciliationError) return NextResponse.json({ error: reconciliationError.message }, { status: 400 });

@@ -65,11 +65,12 @@ function normalizeItems(items: ItemInput[]) {
     const quantity = Number(item.quantity ?? 1);
     const unitCents = item.unit_cents ?? dollarsToCents(item.unit_dollars || "0");
     if (!description || !Number.isFinite(quantity) || quantity <= 0 || unitCents == null || unitCents < 0) return [];
+    const wholeQuantity = Math.max(1, Math.round(quantity));
     return [{
       id: item.id,
       description,
       details: item.details?.trim() || null,
-      quantity: Math.round(quantity * 1000) / 1000,
+      quantity: wholeQuantity,
       unit_label: String(item.unit_label || "item").trim() || "item",
       unit_cents: unitCents,
       taxable: item.taxable !== false,

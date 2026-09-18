@@ -5,13 +5,21 @@ import type { CompanyLike, InvoiceAddress, InvoiceLike } from "@/lib/crm/pdf";
 const PAGE_W = 612;
 const PAGE_H = 792;
 const MARGIN = 48;
-const NAVY = rgb(0.075, 0.149, 0.227);
-const MUTED = rgb(0.29, 0.333, 0.408);
-const RULE = rgb(0.54, 0.6, 0.67);
+const CONTENT_W = PAGE_W - MARGIN * 2;
+const NAVY = rgb(0.125, 0.149, 0.176);
+const MUTED = rgb(0.38, 0.41, 0.45);
+const RULE = rgb(0.57, 0.62, 0.66);
+const LIGHT_RULE = rgb(0.80, 0.82, 0.84);
 const VOID_RED = rgb(0.88, 0.11, 0.28);
 
 function money(cents?: number | null) {
   return `$${centsToDollars(cents)}`;
+}
+
+function formatQuantity(value: unknown) {
+  const quantity = Number(value);
+  if (!Number.isFinite(quantity)) return "0";
+  return String(Math.max(0, Math.round(quantity)));
 }
 
 function formatDate(value?: string | null, long = false) {
@@ -44,8 +52,7 @@ function addressLines(address?: InvoiceAddress | null) {
   return [
     address.line1,
     address.line2,
-    [address.city, address.province].filter(Boolean).join("  "),
-    address.postal_code,
+    [address.city, address.province, address.postal_code].filter(Boolean).join(" "),
   ].filter(Boolean) as string[];
 }
 
@@ -107,6 +114,8 @@ export async function buildInvoicePdfBytes(options: {
   const company = options.company || {};
   const number = invoice.invoice_number || "DRAFT";
   const companyName = company.trade_name || company.legal_name || "Camz Cleaning";
+  const companyEmail = company.email || "info@camzcleaning.com";
+  const companyPhone = company.phone || "(587) 837-1977";
   const customer = invoice.crm_customers;
   const address = invoice.billing_address || customer?.crm_customer_addresses?.[0] || null;
   const serviceAddress = invoice.service_address || null;
@@ -129,13 +138,7 @@ export async function buildInvoicePdfBytes(options: {
 
   let page = doc.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - MARGIN;
-
-  const ensure = (need: number) => {
-    if (y - need < MARGIN + 24) {
-      page = doc.addPage([PAGE_W, PAGE_H]);
-      y = PAGE_H - MARGIN;
-    }
-  };
+  const footerReserve = 68;
 
   const text = (
     target: PDFPage,
@@ -146,155 +149,196 @@ export async function buildInvoicePdfBytes(options: {
     font: PDFFont,
     color = NAVY,
   ) => {
-    target.drawText(value, { x, y: top - size, size, font, color });
+    target.drawText(String(value ?? ""), { x, y: top - size, size, font, color });
   };
 
+  const drawRight = (
+    value: string,
+    x: number,
+    top: number,
+    size = 10,
+    font: PDFFont = regular,
+    color = NAVY,
+  ) => {
+    text(page, value, x - font.widthOfTextAtSize(value, size), top, size, font, color);
+  };
+
+  const line = (target: PDFPage, x1: number, yPos: number, x2: number, thickness = 1, color = LIGHT_RULE) => {
+    target.drawLine({ start: { x: x1, y: yPos }, end: { x: x2, y: yPos }, thickness, color });
+  };
+
+  const ensure = (need: number) => {
+    if (y - need < MARGIN + footerReserve) {
+      page = doc.addPage([PAGE_W, PAGE_H]);
+      y = PAGE_H - MARGIN;
+    }
+  };
+
+  // Letterhead - intentionally compact to match the supplied reference invoice.
   if (logo) {
-    const size = 52;
+    const size = 54;
     const scaled = logo.scaleToFit(size, size);
-    page.drawImage(logo, { x: MARGIN, y: y - scaled.height, width: scaled.width, height: scaled.height });
+    page.drawImage(logo, {
+      x: MARGIN,
+      y: y - scaled.height,
+      width: scaled.width,
+      height: scaled.height,
+    });
   }
 
-  const brandX = MARGIN + (logo ? 64 : 0);
-  text(page, companyName, brandX, y, 13, bold);
-  y -= 18;
-  const contact = [company.email || "info@camzcleaning.com", company.phone || "(587) 837-1977"].join("  |  ");
-  text(page, contact, brandX, y, 10, regular, MUTED);
-  y -= 14;
-  if (company.tax_number) {
-    text(page, `GST ${company.tax_number}`, brandX, y, 10, regular, MUTED);
-    y -= 14;
-  }
-  for (const line of [company.address_line1, company.address_line2, [company.city, company.province].filter(Boolean).join(" "), company.postal_code].filter(Boolean) as string[]) {
-    text(page, line, brandX, y, 10, regular, MUTED);
-    y -= 13;
-  }
+  const brandX = MARGIN + (logo ? 68 : 0);
+  text(page, companyName, brandX, y - 1, 11, bold);
+  const contactLine = [companyEmail, companyPhone].filter(Boolean).join(" | ");
+  text(page, contactLine, brandX, y - 18, 9.5, regular);
 
-  const metaX = 390;
-  let metaY = PAGE_H - MARGIN;
-  text(page, `Invoice #${number}`, metaX, metaY, 11, bold);
-  metaY -= 16;
-  if (customer?.customer_code) {
-    text(page, "Customer ID", metaX, metaY, 9, regular, MUTED);
-    metaY -= 13;
-    text(page, customer.customer_code, metaX, metaY, 11, bold);
-    metaY -= 16;
-  }
+  const metaRight = PAGE_W - MARGIN;
+  const invoiceLabel = `Invoice #${number}`;
+  drawRight(invoiceLabel, metaRight, y - 1, 10.5, bold);
   const issueDate = formatDate(invoice.invoice_date || invoice.issue_date || invoice.issued_at);
   if (issueDate) {
-    text(page, "Invoice date", metaX, metaY, 9, regular, MUTED);
-    metaY -= 13;
-    text(page, issueDate, metaX, metaY, 11, regular);
+    drawRight("Issue date", metaRight, y - 30, 9.5, bold);
+    drawRight(issueDate, metaRight, y - 47, 9.5, regular);
   }
 
-  y = Math.min(y, metaY) - 18;
-  page.drawRectangle({ x: MARGIN, y: y - 8, width: PAGE_W - MARGIN * 2, height: 8, color: RULE });
-  y -= 36;
-  text(page, `Invoice #${number}`, MARGIN, y, 26, bold);
-  y -= 22;
+  y -= 86;
+  page.drawRectangle({ x: MARGIN, y: y, width: CONTENT_W, height: 5, color: RULE });
+  y -= 38;
+  text(page, `Invoice #${number}`, MARGIN, y, 25, bold);
+  y -= 48;
 
-  const colW = (PAGE_W - MARGIN * 2) / 3;
-  const summaryTop = y;
-  text(page, "Customer", MARGIN, summaryTop, 11, bold);
-  text(page, "Invoice details", MARGIN + colW, summaryTop, 11, bold);
-  text(page, "Payment", MARGIN + colW * 2, summaryTop, 11, bold);
+  // Three-column summary with the short top rules from the supplied reference.
+  const gap = 10;
+  const colW = (CONTENT_W - gap * 2) / 3;
+  const col1 = MARGIN;
+  const col2 = MARGIN + colW + gap;
+  const col3 = MARGIN + (colW + gap) * 2;
+  line(page, col1, y, col1 + colW);
+  line(page, col2, y, col2 + colW);
+  line(page, col3, y, col3 + colW);
+
+  const summaryHeadingTop = y - 17;
+  text(page, "Customer", col1, summaryHeadingTop, 10.5, bold);
+  text(page, "Invoice Details", col2, summaryHeadingTop, 10.5, bold);
+  text(page, "Payment", col3, summaryHeadingTop, 10.5, bold);
 
   const customerLines = [
-    customer?.customer_code ? `Customer ID ${customer.customer_code}` : null,
     customer?.display_name || "Customer",
     customer?.email,
     customer?.phone,
-    address ? "Billing address" : null,
     ...addressLines(address),
     showServiceAddress ? "Service address" : null,
     ...(showServiceAddress ? addressLines(serviceAddress) : []),
   ].filter(Boolean) as string[];
-  const serviceDate = formatDate(invoice.service_date, true);
   const detailLines = [
     `PDF created ${formatDate(new Date().toISOString(), true)}`,
-    serviceDate ? `Service date ${serviceDate}` : null,
     money(total),
-  ].filter(Boolean) as string[];
+  ];
   const dueDate = formatDate(invoice.due_date, true);
   const paymentLines = [dueDate ? `Due ${dueDate}` : "No due date", fullyPaid ? money(paid) : money(balance)];
 
-  let blockH = 16;
-  [customerLines, detailLines, paymentLines].forEach((lines) => {
-    blockH = Math.max(blockH, 16 + lines.length * 13);
-  });
-  customerLines.forEach((line, index) => text(page, line, MARGIN, summaryTop - 16 - index * 13, 10, regular, MUTED));
-  detailLines.forEach((line, index) => text(page, line, MARGIN + colW, summaryTop - 16 - index * 13, 10, regular, MUTED));
-  paymentLines.forEach((line, index) => text(page, line, MARGIN + colW * 2, summaryTop - 16 - index * 13, 10, regular, MUTED));
-
-  y = summaryTop - blockH - 18;
-
-  const qtyX = 360;
-  const priceX = 430;
-  const amountX = PAGE_W - MARGIN;
-  text(page, "Items", MARGIN, y, 11, bold);
-  text(page, "Qty", qtyX, y, 11, bold);
-  text(page, "Price", priceX, y, 11, bold);
-  const amountHeader = "Amount";
-  text(page, amountHeader, amountX - bold.widthOfTextAtSize(amountHeader, 11), y, 11, bold);
-  y -= 20;
-
-  const drawRight = (value: string, x: number, top: number, size = 10, font: PDFFont = regular) => {
-    text(page, value, x - font.widthOfTextAtSize(value, size), top, size, font);
+  const summaryBodyTop = summaryHeadingTop - 18;
+  const drawSummaryLines = (lines: string[], x: number, maxWidth: number) => {
+    let offset = 0;
+    lines.forEach((value) => {
+      const wrapped = wrap(regular, value, 9.5, maxWidth);
+      wrapped.forEach((part) => {
+        text(page, part, x, summaryBodyTop - offset, 9.5, regular);
+        offset += 13;
+      });
+    });
+    return offset;
   };
+
+  const customerH = drawSummaryLines(customerLines, col1, colW - 4);
+  const detailH = drawSummaryLines(detailLines, col2, colW - 4);
+  const paymentH = drawSummaryLines(paymentLines, col3, colW - 4);
+  y = summaryBodyTop - Math.max(customerH, detailH, paymentH) - 18;
+
+  const qtyRight = 398;
+  const priceRight = 484;
+  const amountRight = PAGE_W - MARGIN;
+
+  line(page, MARGIN, y, PAGE_W - MARGIN);
+  const tableHeadTop = y - 17;
+  text(page, "Items", MARGIN, tableHeadTop, 10.5, bold);
+  drawRight("Quantity", qtyRight, tableHeadTop, 10.5, bold);
+  drawRight("Price", priceRight, tableHeadTop, 10.5, bold);
+  drawRight("Amount", amountRight, tableHeadTop, 10.5, bold);
+  y -= 34;
+  line(page, MARGIN, y, PAGE_W - MARGIN);
+  y -= 17;
 
   if (!items.length) {
     text(page, "No line items", MARGIN, y, 10, regular, MUTED);
-    y -= 20;
+    y -= 24;
+    line(page, MARGIN, y, PAGE_W - MARGIN);
   }
 
   for (const item of items) {
-    const line = item.line_total_cents ?? (item.quantity || 0) * (item.unit_cents || 0);
-    const description = item.details ? `${item.description} — ${item.details}` : item.description;
-    const descLines = wrap(regular, description, 10, qtyX - MARGIN - 12);
-    ensure(14 + descLines.length * 13);
+    const lineTotal = item.line_total_cents ?? (item.quantity || 0) * (item.unit_cents || 0);
+    const description = item.details ? `${item.description} - ${item.details}` : item.description;
+    const descLines = wrap(regular, description, 10, qtyRight - MARGIN - 48);
+    const rowHeight = Math.max(34, descLines.length * 13 + 12);
+    ensure(rowHeight + 10);
+
     descLines.forEach((lineText, index) => text(page, lineText, MARGIN, y - index * 13, 10, regular));
-    drawRight(`${item.quantity}${item.unit_label ? ` ${item.unit_label}` : ""}`, qtyX + 24, y);
-    drawRight(money(item.unit_cents), priceX + 40, y);
-    drawRight(money(line), amountX, y);
-    y -= Math.max(20, descLines.length * 13 + 8);
+    drawRight(formatQuantity(item.quantity), qtyRight, y, 10, regular);
+    drawRight(money(item.unit_cents), priceRight, y, 10, regular);
+    drawRight(money(lineTotal), amountRight, y, 10, regular);
+    y -= rowHeight;
+    line(page, MARGIN, y, PAGE_W - MARGIN);
+    y -= 16;
   }
 
   const totals: Array<{ label: string; value: string; strong?: boolean }> = [
     { label: "Subtotal", value: money(invoice.subtotal_cents) },
   ];
-  if (discount > 0) totals.push({ label: `Discount${discountReason ? ` - ${discountReason}` : ""}`, value: `-${money(discount)}` });
-  if (tax > 0) totals.push({ label: `GST${invoice.tax_rate_bps ? ` (${Number(invoice.tax_rate_bps) / 100}%)` : ""}`, value: money(tax) });
-  totals.push({ label: fullyPaid ? "Total paid" : "Total", value: money(fullyPaid ? paid : total), strong: true });
+  if (discount > 0) {
+    totals.push({
+      label: `Discount${discountReason ? ` - ${discountReason}` : ""}`,
+      value: `-${money(discount)}`,
+    });
+  }
+  if (tax > 0) {
+    totals.push({
+      label: `GST${invoice.tax_rate_bps ? ` (${Number(invoice.tax_rate_bps) / 100}%)` : ""}`,
+      value: money(tax),
+    });
+  }
+  totals.push({ label: fullyPaid ? "Total Paid" : "Total", value: money(fullyPaid ? paid : total), strong: true });
   if (!fullyPaid) {
     totals.push({ label: "Amount paid", value: money(paid) });
     totals.push({ label: "Balance due", value: money(balance), strong: true });
   }
 
   for (const row of totals) {
-    ensure(28);
-    const size = row.strong ? 16 : 11;
+    const rowHeight = row.strong ? 43 : 30;
+    ensure(rowHeight + 8);
+    const size = row.strong ? 18 : 10.5;
     const font = row.strong ? bold : regular;
-    y -= row.strong ? 10 : 4;
-    text(page, row.label, MARGIN, y, size, font);
-    drawRight(row.value, amountX, y, size, font);
-    y -= row.strong ? 24 : 18;
+    const top = y;
+    text(page, row.label, MARGIN, top, size, font);
+    drawRight(row.value, amountRight, top, size, font);
+    y -= rowHeight;
+    line(page, MARGIN, y, PAGE_W - MARGIN);
+    y -= row.strong ? 16 : 12;
   }
 
   if (payments.length) {
-    ensure(36);
-    text(page, "Payments", MARGIN, y, 11, bold);
-    y -= 16;
+    ensure(50);
+    text(page, "Payments", MARGIN, y, 10.5, bold);
+    y -= 18;
     for (const payment of payments) {
       const label = `${formatDate(payment.received_at)} (${paymentLabel(payment.method)})`;
-      ensure(20);
-      text(page, label, MARGIN, y, 10, regular, MUTED);
-      drawRight(money(payment.amount_cents), amountX, y);
-      y -= 16;
+      ensure(28);
+      text(page, label, MARGIN, y, 10, regular);
+      drawRight(money(payment.amount_cents), amountRight, y, 10, regular);
+      y -= 15;
       if (payment.notes) {
-        const noteLines = wrap(regular, payment.notes, 9, PAGE_W - MARGIN * 2 - 80);
+        const noteLines = wrap(regular, payment.notes, 9.5, CONTENT_W - 90);
         for (const note of noteLines) {
-          ensure(14);
-          text(page, note, MARGIN, y, 9, regular, MUTED);
+          ensure(13);
+          text(page, note, MARGIN, y, 9.5, regular);
           y -= 12;
         }
       }
@@ -308,26 +352,41 @@ export async function buildInvoicePdfBytes(options: {
   ].filter(Boolean) as Array<{ title: string; body: string }>;
 
   for (const note of notes) {
-    ensure(40);
-    y -= 8;
+    ensure(44);
+    y -= 10;
     if (note.title) {
-      text(page, note.title, MARGIN, y, 11, bold);
-      y -= 14;
+      text(page, note.title, MARGIN, y, 10.5, bold);
+      y -= 16;
     }
-    for (const line of wrap(regular, note.body, 10, PAGE_W - MARGIN * 2)) {
+    for (const noteLine of wrap(regular, note.body, 9.5, CONTENT_W)) {
       ensure(14);
-      text(page, line, MARGIN, y, 10, regular, MUTED);
+      text(page, noteLine, MARGIN, y, 9.5, regular, MUTED);
       y -= 13;
     }
   }
 
   if (invoice.is_void) {
-    ensure(40);
+    ensure(42);
     const label = "VOID";
     const size = 36;
     const width = bold.widthOfTextAtSize(label, size);
     text(page, label, (PAGE_W - width) / 2, y - 8, size, bold, VOID_RED);
   }
+
+  // Footer and page numbering are added after all pages exist.
+  const pages = doc.getPages();
+  pages.forEach((pdfPage, index) => {
+    const footerY = 39;
+    const pageText = `Page ${index + 1} of ${pages.length}`;
+    pdfPage.drawText(pageText, {
+      x: PAGE_W - MARGIN - regular.widthOfTextAtSize(pageText, 9),
+      y: footerY,
+      size: 9,
+      font: regular,
+      color: RULE,
+    });
+
+  });
 
   doc.setTitle(`Invoice ${number}`);
   doc.setAuthor(companyName);

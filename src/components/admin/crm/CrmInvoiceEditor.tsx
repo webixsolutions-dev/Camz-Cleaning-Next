@@ -146,9 +146,15 @@ const blankLine = (): Line => ({
   details: "",
   quantity: "1",
   unit_label: "service",
-  unit_dollars: "0.00",
+  unit_dollars: "",
   taxable: true,
 });
+
+function wholeQuantity(value: string | number | null | undefined) {
+  const quantity = Number(value);
+  if (!Number.isFinite(quantity)) return 1;
+  return Math.max(1, Math.round(quantity));
+}
 
 export default function CrmInvoiceEditor({
   invoiceId,
@@ -192,6 +198,7 @@ export default function CrmInvoiceEditor({
   const [saveState, setSaveState] = useState<"saved" | "unsaved" | "saving">("saved");
   const [duplicateInvoices, setDuplicateInvoices] = useState<Array<{ id: string; invoice_number: string | null; invoice_date: string; total_cents: number }>>([]);
   const lastSavedFingerprint = useRef("");
+  const saveInFlightRef = useRef(false);
 
   const draft = !invoice || invoice.status === "draft";
   const issued = Boolean(invoice && invoice.status !== "draft" && !invoice.is_void);
@@ -290,19 +297,45 @@ export default function CrmInvoiceEditor({
           setPaymentAmount(centsToDollars(current.balance_cents));
         }
         const invoiceItems = current.crm_invoice_items || [];
-        setLines(
-          invoiceItems.length
-            ? invoiceItems.map((item) => ({
-                id: item.id,
-                description: item.description,
-                details: item.details || "",
-                quantity: String(item.quantity),
-                unit_label: item.unit_label || "service",
-                unit_dollars: centsToDollars(item.unit_cents),
-                taxable: item.taxable !== false,
-              }))
-            : [blankLine()],
-        );
+        const loadedLines: Line[] = invoiceItems.length
+          ? invoiceItems.map((item) => ({
+              id: item.id,
+              description: item.description,
+              details: item.details || "",
+              quantity: String(wholeQuantity(item.quantity)),
+              unit_label: item.unit_label || "service",
+              unit_dollars: centsToDollars(item.unit_cents),
+              taxable: item.taxable !== false,
+            }))
+          : [blankLine()];
+        setLines(loadedLines);
+
+        // Mark the exact server state as saved. Without this, simply opening a draft
+        // schedules an unnecessary PATCH, which can race with the user's first edit.
+        lastSavedFingerprint.current = JSON.stringify({
+          customer_id: current.customer_id,
+          billing_address_id: current.billing_address_id || null,
+          service_address_id: current.service_address_id || null,
+          invoice_date: current.invoice_date || today(),
+          service_date: current.service_date || null,
+          due_date: current.due_date || null,
+          notes: current.notes || "",
+          discount_type: current.discount_type || "none",
+          discount_value: Number(current.discount_value || 0),
+          discount_reason: parsedReason.text,
+          show_discount_reason: parsedReason.show,
+          tax_enabled: current.tax_enabled !== false,
+          tax_rate_bps: Math.max(0, Number(current.tax_rate_bps || 0)),
+          items: loadedLines.map((line) => ({
+            id: line.id,
+            description: line.description,
+            details: line.details,
+            quantity: wholeQuantity(line.quantity),
+            unit_label: line.unit_label,
+            unit_dollars: line.unit_dollars,
+            taxable: line.taxable,
+          })),
+        });
       }
       setError("");
       setSaveState("saved");
@@ -323,6 +356,14 @@ export default function CrmInvoiceEditor({
   }, [notice]);
 
   const saveDraft = async (options?: { silent?: boolean }) => {
+    // Never allow two invoice mutations to overlap. API calls can take several
+    // seconds; overlapping autosaves may finish out of order and restore an
+    // older (often zero/blank) line item state.
+    if (saveInFlightRef.current) {
+      setSaveState("unsaved");
+      return invoice?.id || null;
+    }
+    saveInFlightRef.current = true;
     setSaving(true);
     setSaveState("saving");
     setError("");
@@ -345,7 +386,7 @@ export default function CrmInvoiceEditor({
           id: line.id,
           description: line.description,
           details: line.details,
-          quantity: Number(line.quantity || 0),
+          quantity: wholeQuantity(line.quantity),
           unit_label: line.unit_label,
           unit_dollars: line.unit_dollars,
           taxable: line.taxable,
@@ -372,13 +413,19 @@ export default function CrmInvoiceEditor({
         router.replace(`/admin-dashboard/crm/invoices/${saved.id}`);
         return saved.id;
       }
-      if (saved?.id) await load(saved.id);
+
+      // Do not reload the whole invoice after saving. Reloading here used to
+      // overwrite controlled inputs while the user was still typing. The save
+      // response already contains the updated invoice/totals, so keeping the
+      // local form values is both faster and prevents the rate/quantity fields
+      // from jumping back to 0.00.
       return saved?.id || invoice?.id || null;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save invoice");
       setSaveState("unsaved");
       return null;
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   };
@@ -614,7 +661,7 @@ export default function CrmInvoiceEditor({
 
   const draftTotals = useMemo(() => {
     const items = lines.map((line) => ({
-      quantity: Number(line.quantity || 0),
+      quantity: wholeQuantity(line.quantity),
       unit_cents: dollarsToCents(line.unit_dollars) || 0,
       taxable: line.taxable,
     }));
@@ -652,7 +699,7 @@ export default function CrmInvoiceEditor({
           id: line.id,
           description: line.description,
           details: line.details,
-          quantity: Number(line.quantity || 1),
+          quantity: wholeQuantity(line.quantity),
           unit_label: line.unit_label,
           unit_dollars: line.unit_dollars,
           taxable: line.taxable,
@@ -664,14 +711,18 @@ export default function CrmInvoiceEditor({
   useEffect(() => {
     if (!draft || draftFingerprint === lastSavedFingerprint.current) return;
     setSaveState("unsaved");
-    if (!invoice?.id || !customerId) return;
+    if (!invoice?.id || !customerId || saving) return;
+
+    // Debounce autosave and only start it when no other save is running. If the
+    // user changes a field while a request is in flight, `saving` becomes false
+    // afterwards and this effect schedules one fresh save with the latest form.
     const timer = window.setTimeout(() => {
       void saveDraft({ silent: true });
     }, 2500);
     return () => window.clearTimeout(timer);
     // saveDraft intentionally follows the latest controlled form state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerId, draft, draftFingerprint, invoice?.id]);
+  }, [customerId, draft, draftFingerprint, invoice?.id, saving]);
 
   return (
     <div className="relative min-h-full overflow-x-hidden bg-[#F4F7FB] p-4 pb-28 sm:p-6 sm:pb-28 xl:pb-6">
@@ -821,7 +872,20 @@ export default function CrmInvoiceEditor({
                         </label>
                         <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Quantity
-                          <input className={`${fieldClass} mt-1.5`} type="number" min="0.001" step="0.001" inputMode="decimal" value={line.quantity} disabled={!draft} onChange={(event) => updateLine(index, { quantity: event.target.value })} />
+                          <input
+                            className={`${fieldClass} mt-1.5`}
+                            type="number"
+                            min="1"
+                            step="1"
+                            inputMode="numeric"
+                            value={line.quantity}
+                            disabled={!draft}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              if (value === "" || /^\d+$/.test(value)) updateLine(index, { quantity: value });
+                            }}
+                            onBlur={() => updateLine(index, { quantity: String(wholeQuantity(line.quantity)) })}
+                          />
                         </label>
                         <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Unit
