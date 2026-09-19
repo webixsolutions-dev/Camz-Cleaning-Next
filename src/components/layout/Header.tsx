@@ -72,17 +72,24 @@ export default function Header() {
 
       {/* ⚪ NAVBAR */}
       <div className="bg-white">
-        <div className="container-custom mx-auto px-4 py-2 flex items-center justify-between">
-          <Link href="/">
-            <Image src="/logo.webp" alt="Camz Cleaning" width={608} height={174} priority className="h-12 md:h-16 w-auto" />
+        <div className="mx-auto flex w-full max-w-[1560px] items-center justify-between gap-5 px-6 py-4 lg:gap-6 xl:px-8 xl:py-5">
+          <Link href="/" className="shrink-0">
+            <Image
+              src="/logo.webp"
+              alt="Camz Cleaning"
+              width={608}
+              height={174}
+              priority
+              className="h-12 w-auto lg:h-14 xl:h-16"
+            />
           </Link>
 
-          <nav className="hidden md:flex items-center gap-8 text-lg font-medium text-[#0B4E9B]">
+          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-3 whitespace-nowrap text-[13px] font-semibold text-[#0B4E9B] lg:flex xl:gap-5 xl:text-[15px]">
             <Link href="/" className="hover:text-[#00B7EB] transition-colors">HOME</Link>
             <Link href="/about-us" className="hover:text-[#00B7EB] transition-colors">ABOUT US</Link>
 
             <div className="relative group py-2">
-              <button onClick={() => router.push("/services")} className="flex items-center gap-1 cursor-pointer transition-colors group-hover:text-[#00B7EB]">
+              <button onClick={() => router.push("/services")} className="flex items-center gap-1.5 cursor-pointer transition-colors group-hover:text-[#00B7EB]">
                 SERVICES <ChevronDown size={16} />
               </button>
               <div className="absolute left-1/2 top-[calc(100%+8px)] z-50 hidden w-64 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-300/50 group-hover:block">
@@ -93,7 +100,7 @@ export default function Header() {
             </div>
 
             <div className="relative group cursor-pointer py-2">
-              <div className="flex items-center gap-1 group-hover:text-[#00B7EB] transition-colors">
+              <div className="flex items-center gap-1.5 group-hover:text-[#00B7EB] transition-colors">
                 AREAS <ChevronDown size={16} />
               </div>
               <div className="absolute left-1/2 top-[calc(100%+8px)] z-50 hidden w-52 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-300/50 group-hover:block">
@@ -108,42 +115,108 @@ export default function Header() {
           </nav>
 
           {/* Desktop Button */}
-          <div className="hidden md:block">
+          <div className="hidden shrink-0 lg:block">
             {isAuthed ? (
-              <button onClick={handleDashboardClick} className="bg-[#0B4E9B] text-white px-8 py-2.5 rounded-md font-bold hover:bg-[#00B7EB] transition-all cursor-pointer">
+              <button onClick={handleDashboardClick} className="bg-[#0B4E9B] whitespace-nowrap text-white px-5 xl:px-7 py-3 rounded-lg text-sm xl:text-[15px] font-bold hover:bg-[#00B7EB] transition-all cursor-pointer">
                 Dashboard
               </button>
             ) : (
               <Link href="/login">
-                <button className="bg-[#0B4E9B] text-white px-8 py-2.5 rounded-md font-bold hover:bg-[#00B7EB] transition-all">Login</button>
+                <button className="bg-[#0B4E9B] whitespace-nowrap text-white px-5 xl:px-7 py-3 rounded-lg text-sm xl:text-[15px] font-bold hover:bg-[#00B7EB] transition-all">Login</button>
               </Link>
             )}
           </div>
 
-          <button className="md:hidden text-[#0B4E9B]" onClick={() => setIsOpen(!isOpen)}>
+          <button className="lg:hidden text-[#0B4E9B]" onClick={() => setIsOpen(!isOpen)} aria-label="Toggle navigation menu">
             {isOpen ? <X size={28} /> : <Menu size={28} />}
           </button>
         </div>
 
-        {/* 📱 Mobile Menu */}
+        {/* 📱 Mobile / tablet menu */}
         {isOpen && (
-          <div className="md:hidden bg-white border-t text-[#0B4E9B] font-bold max-h-[80vh] overflow-y-auto">
+          <div className="max-h-[80vh] overflow-y-auto border-t bg-white font-bold text-[#0B4E9B] lg:hidden">
             <div className="flex flex-col">
-              <Link href="/" onClick={() => setIsOpen(false)} className="px-6 py-5 border-b">HOME</Link>
-              <Link href="/about-us" onClick={() => setIsOpen(false)} className="px-6 py-5 border-b">ABOUT US</Link>
-              
-              <Link href="/booking" onClick={() => setIsOpen(false)} className="px-6 py-5 border-b">ONLINE BOOKING</Link>
-              <Link href="/contact-us" onClick={() => setIsOpen(false)} className="px-6 py-5 border-b">CONTACT US</Link>
+              <Link href="/" onClick={() => setIsOpen(false)} className="border-b px-6 py-5">HOME</Link>
+              <Link href="/about-us" onClick={() => setIsOpen(false)} className="border-b px-6 py-5">ABOUT US</Link>
 
-              {/* LOGIN BUTTON */}
+              <div className="border-b">
+                <div className="flex items-center">
+                  <Link
+                    href="/services"
+                    onClick={() => setIsOpen(false)}
+                    className="min-w-0 flex-1 px-6 py-5"
+                  >
+                    SERVICES
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setServicesOpen((open) => !open)}
+                    className="flex h-full shrink-0 items-center justify-center px-6 py-5"
+                    aria-label="Toggle services menu"
+                    aria-expanded={servicesOpen}
+                  >
+                    <ChevronDown
+                      size={20}
+                      className={`transition-transform ${servicesOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                </div>
+                {servicesOpen && (
+                  <div className="border-t bg-slate-50 py-2">
+                    {serviceLinks.map((link) => (
+                      <Link
+                        key={link.name}
+                        href={link.href}
+                        onClick={() => setIsOpen(false)}
+                        className="block px-9 py-3 text-sm font-semibold hover:bg-blue-50 hover:text-[#00B7EB]"
+                      >
+                        {link.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-b">
+                <button
+                  type="button"
+                  onClick={() => setAreasOpen((open) => !open)}
+                  className="flex w-full items-center justify-between px-6 py-5 text-left"
+                  aria-expanded={areasOpen}
+                >
+                  <span>AREAS</span>
+                  <ChevronDown
+                    size={20}
+                    className={`transition-transform ${areasOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {areasOpen && (
+                  <div className="border-t bg-slate-50 py-2">
+                    {areaLinks.map((link) => (
+                      <Link
+                        key={link.name}
+                        href={link.href}
+                        onClick={() => setIsOpen(false)}
+                        className="block px-9 py-3 text-sm font-semibold hover:bg-blue-50 hover:text-[#00B7EB]"
+                      >
+                        {link.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <Link href="/booking" onClick={() => setIsOpen(false)} className="border-b px-6 py-5">ONLINE BOOKING</Link>
+              <Link href="/contact-us" onClick={() => setIsOpen(false)} className="border-b px-6 py-5">CONTACT US</Link>
+
               <div className="p-6">
                 {isAuthed ? (
-                  <button onClick={() => { handleDashboardClick(); setIsOpen(false); }} className="bg-[#0B4E9B] text-white w-full py-3 rounded-md cursor-pointer">
+                  <button onClick={() => { handleDashboardClick(); setIsOpen(false); }} className="w-full rounded-md bg-[#0B4E9B] py-3 text-white cursor-pointer">
                     Dashboard
                   </button>
                 ) : (
                   <Link href="/login" onClick={() => setIsOpen(false)}>
-                    <button className="bg-[#0B4E9B] text-white w-full py-3 rounded-md">Login</button>
+                    <button className="w-full rounded-md bg-[#0B4E9B] py-3 text-white">Login</button>
                   </Link>
                 )}
               </div>

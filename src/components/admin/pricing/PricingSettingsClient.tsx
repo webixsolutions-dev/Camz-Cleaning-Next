@@ -20,8 +20,39 @@ const AREA_KEYS = Object.keys(PRICING_AREA_LABELS) as PricingAreaKey[];
 const SCOPE_KEYS = Object.keys(PRICING_SCOPE_LABELS) as PricingScope[];
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-const dollars = (cents: number | null | undefined) => ((Number(cents) || 0) / 100).toFixed(2);
-const cents = (value: string) => Math.max(0, Math.round((Number(value) || 0) * 100));
+const dollars = (cents: number | null | undefined) => String(Math.round((Number(cents) || 0) / 100));
+const cents = (value: string) => Math.max(0, Math.round(Number(value.replace(/[^0-9]/g, "")) || 0) * 100);
+const wholeDollarCents = (value: number | null | undefined) => Math.max(0, Math.round((Number(value) || 0) / 100) * 100);
+
+const normalizeWholeDollarPricing = (value: CleaningPricingConfig): CleaningPricingConfig => {
+  const next = clone(value);
+
+  for (const serviceKey of SERVICE_KEYS) {
+    const service = next.services[serviceKey];
+    service.startingPriceCents = wholeDollarCents(service.startingPriceCents);
+    service.packages.forEach(pkg => {
+      pkg.basePriceCents = wholeDollarCents(pkg.basePriceCents);
+    });
+    AREA_KEYS.forEach(areaKey => {
+      service.additionalCharges[areaKey] = wholeDollarCents(service.additionalCharges[areaKey]);
+    });
+  }
+
+  next.carpet.standaloneMinimumCents = wholeDollarCents(next.carpet.standaloneMinimumCents);
+  next.carpet.firstStandardRoomCents = wholeDollarCents(next.carpet.firstStandardRoomCents);
+  next.carpet.additionalStandardRoomCents = wholeDollarCents(next.carpet.additionalStandardRoomCents);
+  next.carpet.largeRoomCents = wholeDollarCents(next.carpet.largeRoomCents);
+  next.carpet.hallwayCents = wholeDollarCents(next.carpet.hallwayCents);
+  next.carpet.stairFlightCents = wholeDollarCents(next.carpet.stairFlightCents);
+  next.carpet.smallAreaRugCents = wholeDollarCents(next.carpet.smallAreaRugCents);
+  next.carpet.heavyStainAreaCents = wholeDollarCents(next.carpet.heavyStainAreaCents);
+
+  next.addOns.forEach(addOn => {
+    if (addOn.priceCents !== null) addOn.priceCents = wholeDollarCents(addOn.priceCents);
+  });
+
+  return next;
+};
 
 export default function PricingSettingsClient() {
   const [config, setConfig] = useState<CleaningPricingConfig | null>(null);
@@ -71,7 +102,7 @@ export default function PricingSettingsClient() {
       const response = await fetch("/api/admin/pricing-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config, version }),
+        body: JSON.stringify({ config: normalizeWholeDollarPricing(config), version }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to save pricing settings.");
@@ -182,20 +213,59 @@ export default function PricingSettingsClient() {
               <div className="p-5">
                 <h3 className="text-sm font-extrabold text-[#13263A]">Base packages & room allowances</h3>
                 <p className="mt-1 text-xs text-slate-500">Base package prices and included room counts used by the future calculator.</p>
-                <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="min-w-[1250px] w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-500"><tr><th className="p-3">Package</th><th className="p-3">Base price</th>{AREA_KEYS.map(key => <th key={key} className="p-3">{PRICING_AREA_LABELS[key]}</th>)}<th className="p-3">Customer selectable</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {service.packages.map((pkg, packageIndex) => (
-                        <tr key={pkg.id}>
-                          <td className="p-3 align-top"><input value={pkg.name} onChange={event => update(draft => { draft.services[serviceKey].packages[packageIndex].name = event.target.value; })} className="h-9 w-64 rounded-lg border border-slate-200 px-3 font-semibold" /><textarea value={pkg.description} onChange={event => update(draft => { draft.services[serviceKey].packages[packageIndex].description = event.target.value; })} rows={2} className="mt-1 w-64 rounded-lg border border-slate-200 p-2 text-[11px] text-slate-600" /></td>
-                          <td className="p-3 align-top"><MoneyInput centsValue={pkg.basePriceCents} onChange={value => update(draft => { draft.services[serviceKey].packages[packageIndex].basePriceCents = value; })} /></td>
-                          {AREA_KEYS.map(areaKey => <td key={areaKey} className="p-3 align-top"><CompactNumber value={pkg.allowances[areaKey]} onChange={value => update(draft => { draft.services[serviceKey].packages[packageIndex].allowances[areaKey] = value; })} /></td>)}
-                          <td className="p-3 align-top"><input type="checkbox" className="h-4 w-4 accent-[#0B4E9B]" checked={pkg.customerSelectable} onChange={event => update(draft => { draft.services[serviceKey].packages[packageIndex].customerSelectable = event.target.checked; })} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  {service.packages.map((pkg, packageIndex) => (
+                    <div key={pkg.id} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/40 p-4 sm:p-5">
+                      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+                        <div className="min-w-0">
+                          <label className="text-[11px] font-semibold text-slate-500">Package</label>
+                          <input
+                            value={pkg.name}
+                            onChange={event => update(draft => { draft.services[serviceKey].packages[packageIndex].name = event.target.value; })}
+                            className="mt-1.5 h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-blue-300"
+                          />
+                          <textarea
+                            value={pkg.description}
+                            onChange={event => update(draft => { draft.services[serviceKey].packages[packageIndex].description = event.target.value; })}
+                            rows={3}
+                            className="mt-2 w-full min-w-0 resize-y rounded-xl border border-slate-200 bg-white p-3 text-sm leading-5 text-slate-600 outline-none focus:border-blue-300"
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <MoneyInput
+                            label="Base price"
+                            centsValue={pkg.basePriceCents}
+                            onChange={value => update(draft => { draft.services[serviceKey].packages[packageIndex].basePriceCents = value; })}
+                          />
+                          <label className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs font-semibold text-slate-700">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 shrink-0 accent-[#0B4E9B]"
+                              checked={pkg.customerSelectable}
+                              onChange={event => update(draft => { draft.services[serviceKey].packages[packageIndex].customerSelectable = event.target.checked; })}
+                            />
+                            Customer selectable
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 border-t border-slate-200 pt-4">
+                        <p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-slate-400">Included room allowances</p>
+                        <div className="mt-3 grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+                          {AREA_KEYS.map(areaKey => (
+                            <label key={areaKey} className="min-w-0 text-[10px] font-semibold leading-4 text-slate-500">
+                              <span className="block min-h-8">{PRICING_AREA_LABELS[areaKey]}</span>
+                              <CompactNumber
+                                value={pkg.allowances[areaKey]}
+                                onChange={value => update(draft => { draft.services[serviceKey].packages[packageIndex].allowances[areaKey] = value; })}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
                 <div className="mt-6 grid gap-5 xl:grid-cols-[2fr_1fr]">
@@ -232,29 +302,113 @@ export default function PricingSettingsClient() {
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div><h2 className="font-extrabold text-[#13263A]">Optional Add-ons & Inclusion Rules</h2><p className="mt-1 text-xs text-slate-500">Configure price, unit, service visibility and which services already include the task.</p></div>
+            <div>
+              <h2 className="font-extrabold text-[#13263A]">Optional Add-ons & Inclusion Rules</h2>
+              <p className="mt-1 text-xs text-slate-500">Configure price, unit, service visibility and which services already include the task.</p>
+            </div>
             <button type="button" onClick={() => addNewAddOn(update)} className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-[#0B4E9B]"><Plus size={14} /> Add add-on</button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-[1450px] w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500"><tr><th className="p-3">Add-on</th><th className="p-3">Price type</th><th className="p-3">Price</th><th className="p-3">Unit</th><th className="p-3">Available for</th><th className="p-3">Included / hide for</th><th className="p-3">Admin review</th><th className="p-3">Active</th><th className="p-3">Note</th><th className="p-3"></th></tr></thead>
-              <tbody className="divide-y divide-slate-100">
-                {config.addOns.map((addOn, index) => (
-                  <tr key={addOn.id}>
-                    <td className="p-3 align-top"><input value={addOn.name} onChange={event => update(draft => { draft.addOns[index].name = event.target.value; })} className="h-9 w-52 rounded-lg border border-slate-200 px-3 font-semibold" /><p className="mt-1 font-mono text-[10px] text-slate-400">{addOn.id}</p></td>
-                    <td className="p-3 align-top"><select value={addOn.priceType} onChange={event => update(draft => { draft.addOns[index].priceType = event.target.value as AddOnPricing["priceType"]; if (event.target.value === "custom_quote") draft.addOns[index].priceCents = null; })} className="h-9 rounded-lg border border-slate-200 px-2">{["fixed", "from", "per_unit", "custom_quote"].map(type => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></td>
-                    <td className="p-3 align-top">{addOn.priceType === "custom_quote" ? <span className="inline-flex h-9 items-center text-slate-500">Custom quote</span> : <MoneyInput centsValue={addOn.priceCents || 0} onChange={value => update(draft => { draft.addOns[index].priceCents = value; })} />}</td>
-                    <td className="p-3 align-top"><input value={addOn.unit || ""} onChange={event => update(draft => { draft.addOns[index].unit = event.target.value || null; })} placeholder="e.g. room" className="h-9 w-28 rounded-lg border border-slate-200 px-2" /></td>
-                    <td className="p-3 align-top"><ScopeChecks values={addOn.availableFor} onChange={values => update(draft => { draft.addOns[index].availableFor = values; draft.addOns[index].includedFor = draft.addOns[index].includedFor.filter(scope => !values.includes(scope)); })} /></td>
-                    <td className="p-3 align-top"><ScopeChecks values={addOn.includedFor} onChange={values => update(draft => { draft.addOns[index].includedFor = values; draft.addOns[index].availableFor = draft.addOns[index].availableFor.filter(scope => !values.includes(scope)); })} /></td>
-                    <td className="p-3 align-top"><input type="checkbox" className="h-4 w-4 accent-[#0B4E9B]" checked={addOn.adminReview} onChange={event => update(draft => { draft.addOns[index].adminReview = event.target.checked; })} /></td>
-                    <td className="p-3 align-top"><input type="checkbox" className="h-4 w-4 accent-[#0B4E9B]" checked={addOn.active} onChange={event => update(draft => { draft.addOns[index].active = event.target.checked; })} /></td>
-                    <td className="p-3 align-top"><textarea rows={2} value={addOn.note} onChange={event => update(draft => { draft.addOns[index].note = event.target.value; })} className="w-56 rounded-lg border border-slate-200 p-2" /></td>
-                    <td className="p-3 align-top"><button type="button" aria-label={`Delete ${addOn.name}`} onClick={() => update(draft => { draft.addOns.splice(index, 1); })} className="flex h-9 w-9 items-center justify-center rounded-lg border border-red-100 text-red-500 hover:bg-red-50"><Trash2 size={15} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+          <div className="space-y-4 p-4 sm:p-5">
+            {config.addOns.map((addOn, index) => (
+              <article key={addOn.id} className="rounded-2xl border border-slate-200 bg-slate-50/40 p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <label className="block text-[11px] font-semibold text-slate-600">
+                      Add-on name
+                      <input
+                        value={addOn.name}
+                        onChange={event => update(draft => { draft.addOns[index].name = event.target.value; })}
+                        className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-300"
+                      />
+                    </label>
+                    <p className="mt-1 break-all font-mono text-[10px] text-slate-400">{addOn.id}</p>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${addOn.name}`}
+                    onClick={() => update(draft => { draft.addOns.splice(index, 1); })}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-red-100 bg-white text-red-500 hover:bg-red-50"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <label className="block text-[11px] font-semibold text-slate-600">
+                    Price type
+                    <select
+                      value={addOn.priceType}
+                      onChange={event => update(draft => {
+                        draft.addOns[index].priceType = event.target.value as AddOnPricing["priceType"];
+                        if (event.target.value === "custom_quote") draft.addOns[index].priceCents = null;
+                      })}
+                      className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-300"
+                    >
+                      {["fixed", "from", "per_unit", "custom_quote"].map(type => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
+                    </select>
+                  </label>
+
+                  <div>
+                    {addOn.priceType === "custom_quote" ? (
+                      <label className="block text-[11px] font-semibold text-slate-600">
+                        Price
+                        <div className="mt-1.5 flex h-10 items-center rounded-lg border border-slate-200 bg-slate-100 px-3 text-sm text-slate-500">Custom quote</div>
+                      </label>
+                    ) : (
+                      <MoneyInput label="Price" centsValue={addOn.priceCents || 0} onChange={value => update(draft => { draft.addOns[index].priceCents = value; })} />
+                    )}
+                  </div>
+
+                  <label className="block text-[11px] font-semibold text-slate-600">
+                    Unit
+                    <input
+                      value={addOn.unit || ""}
+                      onChange={event => update(draft => { draft.addOns[index].unit = event.target.value || null; })}
+                      placeholder="e.g. room"
+                      className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-300"
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap items-end gap-5 pb-1">
+                    <Toggle label="Admin review" checked={addOn.adminReview} onChange={value => update(draft => { draft.addOns[index].adminReview = value; })} />
+                    <Toggle label="Active" checked={addOn.active} onChange={value => update(draft => { draft.addOns[index].active = value; })} />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Available for</p>
+                    <div className="mt-3">
+                      <ScopeChecks values={addOn.availableFor} onChange={values => update(draft => {
+                        draft.addOns[index].availableFor = values;
+                        draft.addOns[index].includedFor = draft.addOns[index].includedFor.filter(scope => !values.includes(scope));
+                      })} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Included / hide for</p>
+                    <div className="mt-3">
+                      <ScopeChecks values={addOn.includedFor} onChange={values => update(draft => {
+                        draft.addOns[index].includedFor = values;
+                        draft.addOns[index].availableFor = draft.addOns[index].availableFor.filter(scope => !values.includes(scope));
+                      })} />
+                    </div>
+                  </div>
+                </div>
+
+                <label className="mt-4 block text-[11px] font-semibold text-slate-600">
+                  Note
+                  <textarea
+                    rows={2}
+                    value={addOn.note}
+                    onChange={event => update(draft => { draft.addOns[index].note = event.target.value; })}
+                    className="mt-1.5 w-full resize-y rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800 outline-none focus:border-blue-300"
+                  />
+                </label>
+              </article>
+            ))}
           </div>
         </section>
 
@@ -278,7 +432,22 @@ function Card({ title, description, children }: { title: string; description?: s
 }
 
 function MoneyInput({ label, centsValue, onChange }: { label?: string; centsValue: number; onChange: (value: number) => void }) {
-  return <label className="block min-w-[110px] text-[11px] font-semibold text-slate-600">{label && <span>{label}</span>}<div className={label ? "mt-1.5 flex h-9 items-center rounded-lg border border-slate-200 bg-white" : "flex h-9 items-center rounded-lg border border-slate-200 bg-white"}><span className="pl-3 text-slate-400">$</span><input type="number" min="0" step="0.01" value={dollars(centsValue)} onChange={event => onChange(cents(event.target.value))} className="h-full w-full min-w-0 bg-transparent px-2 outline-none" /></div></label>;
+  return (
+    <label className="block min-w-0 text-[11px] font-semibold text-slate-600">
+      {label && <span>{label}</span>}
+      <div className={label ? "mt-1.5 flex h-11 min-w-0 items-center rounded-xl border border-slate-200 bg-white" : "flex h-11 min-w-0 items-center rounded-xl border border-slate-200 bg-white"}>
+        <span className="shrink-0 pl-3 text-slate-400">$</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={dollars(centsValue)}
+          onChange={event => onChange(cents(event.target.value))}
+          className="h-full w-full min-w-0 bg-transparent px-2 text-sm font-semibold text-slate-700 outline-none"
+        />
+      </div>
+    </label>
+  );
 }
 
 function NumberInput({ label, value, min = "0", step = "1", onChange }: { label: string; value: string; min?: string; step?: string; onChange: (value: string) => void }) {
@@ -294,7 +463,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
 }
 
 function CompactNumber({ value, onChange }: { value: number; onChange: (value: number) => void }) {
-  return <input type="number" min="0" step="1" value={value} onChange={event => onChange(Math.max(0, Math.trunc(Number(event.target.value) || 0)))} className="h-9 w-20 rounded-lg border border-slate-200 px-2" />;
+  return <input type="number" min="0" step="1" value={value} onChange={event => onChange(Math.max(0, Math.trunc(Number(event.target.value) || 0)))} className="h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-blue-300" />;
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
@@ -303,5 +472,19 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 
 function ScopeChecks({ values, onChange }: { values: PricingScope[]; onChange: (values: PricingScope[]) => void }) {
   const toggle = (scope: PricingScope, checked: boolean) => onChange(checked ? Array.from(new Set([...values, scope])) : values.filter(value => value !== scope));
-  return <div className="grid grid-cols-2 gap-x-3 gap-y-2">{SCOPE_KEYS.map(scope => <label key={scope} className="flex items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold text-slate-600"><input type="checkbox" checked={values.includes(scope)} onChange={event => toggle(scope, event.target.checked)} className="h-3.5 w-3.5 accent-[#0B4E9B]" />{PRICING_SCOPE_LABELS[scope]}</label>)}</div>;
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {SCOPE_KEYS.map(scope => (
+        <label key={scope} className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold leading-5 text-slate-700">
+          <input
+            type="checkbox"
+            checked={values.includes(scope)}
+            onChange={event => toggle(scope, event.target.checked)}
+            className="h-4 w-4 shrink-0 accent-[#0B4E9B]"
+          />
+          <span className="min-w-0 break-words">{PRICING_SCOPE_LABELS[scope]}</span>
+        </label>
+      ))}
+    </div>
+  );
 }
