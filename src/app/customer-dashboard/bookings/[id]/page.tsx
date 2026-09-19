@@ -13,25 +13,35 @@ import {
   Loader2,
   Bed,
   Bath,
+  ImagePlus,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
-const steps = ["Pending", "Accepted", "In Progress", "Completed", "Approved"];
+const steps = ["Request", "Review", "Approved", "Confirmed", "Completed"];
 
 const statusToStep: Record<string, number> = {
   pending: 0,
-  accepted: 1,
-  assigned: 1,
-  in_progress: 2,
-  completed: 3,
-  approved: 4,
+  new_request: 0,
+  under_review: 1,
+  awaiting_photos: 1,
+  custom_quote_required: 1,
+  quote_sent: 1,
+  approved: 2,
+  booking_confirmed: 3,
+  accepted: 3,
+  assigned: 3,
+  in_progress: 3,
+  completed: 4,
 };
 
 const getStatusStyle = (status: string) => {
   const s = status.toLowerCase();
-  if (s === "pending") return "bg-amber-50 text-amber-700";
-  if (s === "accepted" || s === "assigned" || s === "in_progress")
+  if (["pending", "new_request"].includes(s)) return "bg-sky-50 text-sky-700";
+  if (["under_review", "awaiting_photos", "custom_quote_required"].includes(s))
+    return "bg-amber-50 text-amber-700";
+  if (s === "quote_sent") return "bg-violet-50 text-violet-700";
+  if (["accepted", "assigned", "in_progress", "booking_confirmed"].includes(s))
     return "bg-blue-50 text-blue-700";
   if (s === "completed" || s === "approved")
     return "bg-emerald-50 text-emerald-700";
@@ -68,6 +78,9 @@ export default function BookingDetailsPage() {
   const [cleanerName, setCleanerName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewPhotos, setReviewPhotos] = useState<File[]>([]);
+  const [uploadingReviewPhotos, setUploadingReviewPhotos] = useState(false);
+  const [reviewPhotoError, setReviewPhotoError] = useState("");
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -119,6 +132,49 @@ export default function BookingDetailsPage() {
     fetchJob();
   }, [user, id]);
 
+  const uploadRequestedPhotos = async () => {
+    if (!job || reviewPhotos.length === 0) return;
+    setUploadingReviewPhotos(true);
+    setReviewPhotoError("");
+    try {
+      const payload = new FormData();
+      payload.append("bookingId", job.id);
+      reviewPhotos.forEach((file) => payload.append("photos", file));
+      const response = await fetch("/api/booking/review-photos", {
+        method: "POST",
+        body: payload,
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        paths?: string[];
+        status?: string;
+      };
+      if (!response.ok) throw new Error(result.error || "Unable to upload photos.");
+      setJob((current) =>
+        current
+          ? {
+              ...current,
+              status: result.status || "under_review",
+              service_data: {
+                ...(current.service_data || {}),
+                additionalPhotosRequested: false,
+                additionalPhotosSubmittedAt: new Date().toISOString(),
+                conditionPhotoPaths: [
+                  ...((current.service_data?.conditionPhotoPaths as string[] | undefined) || []),
+                  ...(result.paths || []),
+                ],
+              },
+            }
+          : current,
+      );
+      setReviewPhotos([]);
+    } catch (err) {
+      setReviewPhotoError(err instanceof Error ? err.message : "Unable to upload photos.");
+    } finally {
+      setUploadingReviewPhotos(false);
+    }
+  };
+
   if (loading || authLoading) {
     return (
       <div className="min-h-screen bg-[#F4F7FB] text-slate-900 flex items-center justify-center">
@@ -158,10 +214,25 @@ export default function BookingDetailsPage() {
   });
 
   const currentStep = statusToStep[job.status.toLowerCase()] ?? 0;
-  const totalPrice = job.total_price ?? 0;
-  const taxRate = job.tax_rate ?? 0;
-  const subtotal = taxRate > 0 ? totalPrice / (1 + taxRate) : totalPrice;
-  const taxAmount = totalPrice - subtotal;
+  const serviceData = job.service_data || {};
+  const adminQuote = serviceData.adminQuote && typeof serviceData.adminQuote === "object"
+    ? serviceData.adminQuote
+    : null;
+  const taxRate = Number(adminQuote?.taxRate ?? job.tax_rate ?? 0);
+  const normalizedTaxRate = taxRate > 1 ? taxRate / 100 : taxRate;
+  const calculatedEstimate = Number(serviceData.calculatedTotal || 0);
+  const totalPrice = Number(adminQuote?.total ?? job.total_price ?? calculatedEstimate ?? 0);
+  const subtotal = Number(
+    adminQuote?.subtotal ??
+      serviceData.calculatedSubtotal ??
+      (normalizedTaxRate > 0 ? totalPrice / (1 + normalizedTaxRate) : totalPrice),
+  );
+  const taxAmount = Number(
+    adminQuote?.tax ?? serviceData.calculatedTax ?? Math.max(0, totalPrice - subtotal),
+  );
+  const quoteItems = Array.isArray(adminQuote?.items) ? adminQuote.items : [];
+  const hasFinalQuote = Boolean(adminQuote && Number(adminQuote.total) >= 0);
+  const requiresReview = ["under_review", "awaiting_photos", "custom_quote_required", "quote_sent"].includes(job.status.toLowerCase());
 
   return (
     <div className="min-h-screen bg-[#F4F7FB] text-slate-900 px-4 py-4 sm:px-5 lg:px-6">
@@ -261,12 +332,83 @@ export default function BookingDetailsPage() {
               <BadgeDollarSign size={18} />
               <span>Price:</span>
             </div>
-            <span className="text-2xl md:text-3xl font-bold text-[#4A86F7]">
-              CAD ${totalPrice.toFixed(2)}
+            <span className="text-right text-2xl md:text-3xl font-bold text-[#4A86F7]">
+              {requiresReview && !hasFinalQuote ? "Under review" : `CAD $${totalPrice.toFixed(2)}`}
+              {requiresReview && !hasFinalQuote && calculatedEstimate > 0 && (
+                <span className="mt-1 block text-xs font-semibold text-slate-400">
+                  Estimate: CAD ${calculatedEstimate.toFixed(2)}
+                </span>
+              )}
             </span>
           </div>
         </div>
       </div>
+
+      {adminQuote && (
+        <div className="mb-6 rounded-[28px] border border-violet-200 bg-violet-50/40 p-5 md:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-violet-600">Camz Cleaning Quote</p>
+              <h3 className="mt-1 text-2xl font-bold text-slate-900">Custom Quote Details</h3>
+              {adminQuote.note && <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{adminQuote.note}</p>}
+            </div>
+            <div className="rounded-xl bg-white px-4 py-3 text-right shadow-sm">
+              <div className="text-xs font-semibold text-slate-400">Quote Total</div>
+              <div className="mt-1 text-2xl font-bold text-violet-700">CAD ${Number(adminQuote.total || 0).toFixed(2)}</div>
+            </div>
+          </div>
+
+          {quoteItems.length > 0 && (
+            <div className="mt-5 overflow-hidden rounded-2xl border border-violet-100 bg-white">
+              {quoteItems.map((item: any, index: number) => (
+                <div key={String(item.id || index)} className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 last:border-b-0">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">{item.label}</div>
+                    <div className="mt-0.5 text-xs text-slate-400">{Number(item.quantity || 1)} × CAD ${Number(item.unitPrice || 0).toFixed(2)}</div>
+                  </div>
+                  <div className="text-sm font-bold text-slate-800">CAD ${Number(item.amount ?? Number(item.quantity || 1) * Number(item.unitPrice || 0)).toFixed(2)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {serviceData.additionalPhotosRequested && (
+        <div className="mb-6 rounded-[24px] border border-amber-200 bg-amber-50 p-5">
+          <div className="flex items-start gap-3">
+            <ImagePlus className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+            <div className="flex-1">
+              <strong className="text-sm text-amber-900">Additional photos requested</strong>
+              <p className="mt-1 text-sm leading-6 text-amber-800">
+                Camz Cleaning needs more property-condition photos before the quote or booking can be finalized.
+              </p>
+              <label className="mt-4 block rounded-xl border border-dashed border-amber-300 bg-white p-4 text-center cursor-pointer hover:bg-amber-50/40">
+                <input
+                  type="file"
+                  multiple
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(event) => setReviewPhotos(Array.from(event.target.files || []).slice(0, 6))}
+                />
+                <span className="text-sm font-semibold text-amber-800">
+                  {reviewPhotos.length ? `${reviewPhotos.length} photo(s) selected` : "Choose JPG, PNG or WEBP photos"}
+                </span>
+                <span className="mt-1 block text-xs text-slate-400">Up to 6 photos, 8 MB each</span>
+              </label>
+              {reviewPhotoError && <p className="mt-2 text-xs font-semibold text-rose-600">{reviewPhotoError}</p>}
+              <button
+                type="button"
+                disabled={!reviewPhotos.length || uploadingReviewPhotos}
+                onClick={uploadRequestedPhotos}
+                className="mt-3 inline-flex h-10 items-center justify-center rounded-xl bg-amber-700 px-5 text-sm font-bold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {uploadingReviewPhotos ? "Uploading..." : "Submit Photos for Review"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Progress */}
       <div className="rounded-[28px] border border-slate-200 bg-white p-5 md:p-8 mb-6">
@@ -325,7 +467,7 @@ export default function BookingDetailsPage() {
         <div className="space-y-5">
           <div className="flex items-center justify-between gap-4">
             <span className="text-slate-500 text-sm md:text-base">
-              Service Price
+              {hasFinalQuote ? "Quote Subtotal" : requiresReview ? "Calculated Subtotal" : "Service Price"}
             </span>
             <span className="text-xl md:text-2xl font-bold">
               CAD ${subtotal.toFixed(2)}
@@ -335,7 +477,7 @@ export default function BookingDetailsPage() {
           {taxAmount > 0 && (
             <div className="flex items-center justify-between gap-4">
               <span className="text-slate-500 text-sm md:text-base">
-                Tax ({(taxRate * 100).toFixed(0)}%)
+                Tax ({(normalizedTaxRate * 100).toFixed(0)}%)
               </span>
               <span className="text-xl md:text-2xl font-bold">
                 CAD ${taxAmount.toFixed(2)}
@@ -345,8 +487,11 @@ export default function BookingDetailsPage() {
 
           <div className="border-t border-slate-200 pt-6 flex items-center justify-between gap-4">
             <span className="text-2xl md:text-3xl font-bold">Total</span>
-            <span className="text-3xl md:text-5xl font-bold text-emerald-700">
-              CAD ${totalPrice.toFixed(2)}
+            <span className="text-right text-3xl md:text-5xl font-bold text-emerald-700">
+              {requiresReview && !hasFinalQuote ? "Pending" : `CAD $${totalPrice.toFixed(2)}`}
+              {requiresReview && !hasFinalQuote && calculatedEstimate > 0 && (
+                <span className="mt-1 block text-xs font-semibold text-slate-400">Calculated estimate CAD ${calculatedEstimate.toFixed(2)}</span>
+              )}
             </span>
           </div>
         </div>

@@ -85,9 +85,9 @@ export default function Header() {
               <button onClick={() => router.push("/services")} className="flex items-center gap-1 cursor-pointer transition-colors group-hover:text-[#00B7EB]">
                 SERVICES <ChevronDown size={16} />
               </button>
-              <div className="absolute left-0 top-full hidden min-w-[250px] border-t-2 border-[#00B7EB] bg-white py-2 shadow-xl group-hover:block z-50">
+              <div className="absolute left-1/2 top-[calc(100%+8px)] z-50 hidden w-64 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-300/50 group-hover:block">
                 {serviceLinks.map((link) => (
-                  <Link key={link.name} href={link.href} className="block border-b border-gray-50 px-6 py-3 transition-all hover:bg-gray-50 hover:text-[#00B7EB] last:border-0">{link.name}</Link>
+                  <Link key={link.name} href={link.href} className="block rounded-xl px-4 py-3 text-sm font-bold transition-all hover:bg-blue-50 hover:text-[#00B7EB]">{link.name}</Link>
                 ))}
               </div>
             </div>
@@ -96,9 +96,9 @@ export default function Header() {
               <div className="flex items-center gap-1 group-hover:text-[#00B7EB] transition-colors">
                 AREAS <ChevronDown size={16} />
               </div>
-              <div className="absolute left-0 top-full hidden group-hover:block bg-white shadow-xl border-t-2 border-[#00B7EB] min-w-[200px] py-2">
+              <div className="absolute left-1/2 top-[calc(100%+8px)] z-50 hidden w-52 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-300/50 group-hover:block">
                 {areaLinks.map((link) => (
-                  <Link key={link.name} href={link.href} className="block px-6 py-3 hover:bg-gray-50 hover:text-[#00B7EB] transition-all border-b border-gray-50 last:border-0">{link.name}</Link>
+                  <Link key={link.name} href={link.href} className="block rounded-xl px-4 py-3 text-sm font-bold transition-all hover:bg-blue-50 hover:text-[#00B7EB]">{link.name}</Link>
                 ))}
               </div>
             </div>

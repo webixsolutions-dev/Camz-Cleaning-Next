@@ -11,6 +11,13 @@ import {
   isSupportedCoordinates,
   SERVICE_AREA_LABEL,
 } from "@/lib/serviceArea";
+import { validatePricingConfig } from "@/lib/pricing/config";
+import { calculateStandardCleaningPrice } from "@/lib/pricing/standard";
+import { calculateDeepCleaningPrice } from "@/lib/pricing/deep";
+import { calculateMoveInOutPrice } from "@/lib/pricing/moveInOut";
+import { calculateCarpetPrice, carpetAreaCount } from "@/lib/pricing/carpet";
+import { resolveCleaningPricingScope } from "@/lib/pricing/serviceScope";
+import { calculateServiceAddOns } from "@/lib/pricing/addOns";
 
 type Coordinates = { lat: number; lng: number };
 
@@ -19,6 +26,7 @@ type BookingPayload = {
   isGuest?: boolean;
   guestName?: string;
   guestEmail?: string;
+  guestPhone?: string;
   bookingDateTime?: string;
   address?: string;
   coordinates?: Coordinates | null;
@@ -44,6 +52,21 @@ const safeNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+
+const validPhone = (value: string) => value.replace(/\D/g, "").length >= 7;
+const PROPERTY_TYPES = new Set([
+  "house",
+  "apartment",
+  "condo",
+  "townhouse",
+  "basement_suite",
+  "rental_property",
+  "other",
+]);
+const PROPERTY_CONDITIONS = new Set(["regular", "moderate", "heavy"]);
+const BOOKING_PHOTO_PREFIX = "booking-pending/";
+const CANADIAN_POSTAL_CODE_PATTERN =
+  /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ][ -]?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i;
 
 function calculatePricing(
   service: Record<string, unknown>,
@@ -159,6 +182,7 @@ export async function POST(request: NextRequest) {
     const address = cleanString(body.address, 300);
     const guestName = cleanString(body.guestName, 120);
     const guestEmail = cleanString(body.guestEmail, 180).toLowerCase();
+    const guestPhone = cleanString(body.guestPhone, 60);
     const pricingType = body.pricingType === "Hourly" ? "Hourly" : "Fixed";
     const formData =
       body.formData && typeof body.formData === "object"
@@ -226,6 +250,12 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+      if (!validPhone(guestPhone)) {
+        return NextResponse.json(
+          { error: "Please enter a valid phone number." },
+          { status: 400 },
+        );
+      }
     }
 
     const sessionClient = await createServerClient();
@@ -272,13 +302,368 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     const config = (configRow?.config_json || {}) as ServiceConfig;
-    const pricing = calculatePricing(
-      service as Record<string, unknown>,
-      config,
-      formData,
-      pricingType,
-      safeNumber(body.hours, 3),
+    let effectivePricingType = pricingType;
+    let customQuoteRequired = false;
+    let persistedServiceData: Record<string, unknown> = { ...formData };
+    let pricing: {
+      subtotal: number;
+      tax: number;
+      taxRate: number;
+      total: number;
+      hours: number;
+    };
+
+    const cleaningPricingScope = resolveCleaningPricingScope({
+      service_type: service.service_type,
+      title: service.title,
+    });
+
+    if (cleaningPricingScope) {
+      effectivePricingType = "Fixed";
+
+      const { data: pricingRow, error: pricingError } = await admin
+        .from("cleaning_pricing_config")
+        .select("config,version")
+        .eq("id", "default")
+        .maybeSingle();
+
+      if (pricingError || !pricingRow) {
+        console.error("Cleaning pricing config unavailable:", pricingError);
+        return NextResponse.json(
+          { error: "Cleaning pricing is temporarily unavailable." },
+          { status: 503 },
+        );
+      }
+
+      const validation = validatePricingConfig(pricingRow.config);
+      if (!validation.ok) {
+        console.error("Invalid cleaning pricing config:", validation.error);
+        return NextResponse.json(
+          { error: "Cleaning pricing is temporarily unavailable." },
+          { status: 503 },
+        );
+      }
+
+      const customerName = body.isGuest
+        ? guestName
+        : cleanString(formData.customerName, 120);
+      const customerEmail = body.isGuest
+        ? guestEmail
+        : cleanString(formData.customerEmail, 180).toLowerCase();
+      const customerPhone = body.isGuest
+        ? guestPhone
+        : cleanString(formData.customerPhone, 60);
+      const propertyType = cleanString(formData.propertyType, 40);
+      const propertyCondition = cleanString(formData.propertyCondition, 40);
+      const postalCode = cleanString(formData.postalCode, 12).toUpperCase();
+      const additionalInstructions = cleanString(formData.additionalInstructions, 1500);
+      const conditionPhotoPaths = Array.isArray(formData.conditionPhotoPaths)
+        ? formData.conditionPhotoPaths
+            .map((value) => cleanString(value, 500))
+            .filter((value) => value.startsWith(BOOKING_PHOTO_PREFIX))
+            .slice(0, 6)
+        : [];
+
+      if (customerName.length < 2) {
+        return NextResponse.json({ error: "Please enter the customer name." }, { status: 400 });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+        return NextResponse.json({ error: "Please enter a valid customer email." }, { status: 400 });
+      }
+      if (!validPhone(customerPhone)) {
+        return NextResponse.json({ error: "Please enter a valid customer phone number." }, { status: 400 });
+      }
+      if (!PROPERTY_TYPES.has(propertyType)) {
+        return NextResponse.json({ error: "Please select a valid property type." }, { status: 400 });
+      }
+      if (!PROPERTY_CONDITIONS.has(propertyCondition)) {
+        return NextResponse.json({ error: "Please select a valid property condition." }, { status: 400 });
+      }
+      if (!CANADIAN_POSTAL_CODE_PATTERN.test(postalCode)) {
+        return NextResponse.json({ error: "Please provide a valid Canadian postal code." }, { status: 400 });
+      }
+      if (
+        cleaningPricingScope === "move_in_out" &&
+        typeof formData.movePropertyEmpty !== "boolean"
+      ) {
+        return NextResponse.json(
+          { error: "Please confirm whether the Move-In / Move-Out property will be empty." },
+          { status: 400 },
+        );
+      }
+
+      const areaInput = {
+        bedrooms: safeNumber(formData.bedrooms, 1),
+        fullBathrooms: safeNumber(formData.fullBathrooms, 1),
+        halfBathrooms: safeNumber(formData.halfBathrooms, 0),
+        kitchens: safeNumber(formData.kitchens, 1),
+        livingRooms: safeNumber(formData.livingRooms, 1),
+        finishedBasement: safeNumber(formData.finishedBasement, 0),
+        stairFlights: safeNumber(formData.stairFlights, 0),
+        unusualLayout: formData.unusualLayout === true,
+      };
+
+      const carpetInput = {
+        standardRooms: safeNumber(formData.carpetStandardRooms, 0),
+        largeRooms: safeNumber(formData.carpetLargeRooms, 0),
+        hallways: safeNumber(formData.carpetHallways, 0),
+        stairFlights: safeNumber(formData.carpetStairFlights, 0),
+        smallAreaRugs: safeNumber(formData.carpetSmallAreaRugs, 0),
+        heavyStainAreas: safeNumber(formData.carpetHeavyStainAreas, 0),
+        petUrineOdor: formData.carpetPetUrineOdor === true,
+      };
+
+      let baseSubtotalCents = 0;
+      let baseCustomQuote = false;
+      let baseCustomQuoteReason: string | null = null;
+      let packageId: string | null = null;
+      let packageName: string | null = null;
+      let pricingBreakdown: Array<{
+        key: string;
+        label: string;
+        quantity: number;
+        unitPrice: number;
+        amount: number;
+      }> = [];
+
+      if (cleaningPricingScope === "standard") {
+        const result = calculateStandardCleaningPrice(validation.config, {
+          ...areaInput,
+          preferredPackageId: cleanString(formData.standardPackageId, 80),
+        });
+        baseSubtotalCents = result.subtotalCents;
+        baseCustomQuote = result.customQuote;
+        baseCustomQuoteReason = result.customQuoteReason;
+        packageId = result.packageId;
+        packageName = result.packageName;
+        pricingBreakdown = result.lineItems.map((item) => ({
+          key: item.key,
+          label: item.label,
+          quantity: item.quantity,
+          unitPrice: item.unitPriceCents / 100,
+          amount: item.amountCents / 100,
+        }));
+      } else if (cleaningPricingScope === "deep") {
+        const result = calculateDeepCleaningPrice(validation.config, areaInput);
+        baseSubtotalCents = result.subtotalCents;
+        baseCustomQuote = result.customQuote;
+        baseCustomQuoteReason = result.customQuoteReason;
+        packageId = result.packageId;
+        packageName = result.packageName;
+        pricingBreakdown = result.lineItems.map((item) => ({
+          key: item.key,
+          label: item.label,
+          quantity: item.quantity,
+          unitPrice: item.unitPriceCents / 100,
+          amount: item.amountCents / 100,
+        }));
+      } else if (cleaningPricingScope === "move_in_out") {
+        const result = calculateMoveInOutPrice(validation.config, areaInput);
+        baseSubtotalCents = result.subtotalCents;
+        baseCustomQuote = result.customQuote;
+        baseCustomQuoteReason = result.customQuoteReason;
+        packageId = result.packageId;
+        packageName = result.packageName;
+        pricingBreakdown = result.lineItems.map((item) => ({
+          key: item.key,
+          label: item.label,
+          quantity: item.quantity,
+          unitPrice: item.unitPriceCents / 100,
+          amount: item.amountCents / 100,
+        }));
+      } else {
+        const result = calculateCarpetPrice(
+          validation.config,
+          carpetInput,
+          "standalone",
+        );
+        if (carpetAreaCount(result.selection) === 0 && !result.selection.petUrineOdor) {
+          return NextResponse.json(
+            { error: "Please select at least one carpeted area or treatment." },
+            { status: 400 },
+          );
+        }
+        baseSubtotalCents = result.subtotalCents;
+        baseCustomQuote = result.customQuote;
+        baseCustomQuoteReason = result.customQuoteReason;
+        pricingBreakdown = result.lineItems.map((item) => ({
+          key: `carpet_${item.key}`,
+          label: item.label,
+          quantity: item.quantity,
+          unitPrice: item.unitPriceCents / 100,
+          amount: item.amountCents / 100,
+        }));
+      }
+
+      let carpetAddonSubtotalCents = 0;
+      let carpetAddonCustomQuote = false;
+      let carpetAddonReason: string | null = null;
+
+      if (cleaningPricingScope !== "carpet" && formData.carpetEnabled === true) {
+        const carpetAddon = calculateCarpetPrice(
+          validation.config,
+          carpetInput,
+          "addon",
+        );
+        carpetAddonSubtotalCents = carpetAddon.subtotalCents;
+        carpetAddonCustomQuote = carpetAddon.customQuote;
+        carpetAddonReason = carpetAddon.customQuoteReason;
+        pricingBreakdown.push(
+          ...carpetAddon.lineItems
+            .filter((item) => item.amountCents > 0)
+            .map((item) => ({
+              key: `carpet_${item.key}`,
+              label: `Carpet: ${item.label}`,
+              quantity: item.quantity,
+              unitPrice: item.unitPriceCents / 100,
+              amount: item.amountCents / 100,
+            })),
+        );
+      }
+
+      const addOnSelection =
+        formData.selectedAddOns && typeof formData.selectedAddOns === "object"
+          ? (formData.selectedAddOns as Record<string, number | boolean | string>)
+          : {};
+      const addOns = calculateServiceAddOns(
+        validation.config,
+        cleaningPricingScope,
+        addOnSelection,
+      );
+      pricingBreakdown.push(
+        ...addOns.lineItems.map((item) => ({
+          key: `addon_${item.id}`,
+          label: item.label,
+          quantity: item.quantity,
+          unitPrice: item.unitPriceCents / 100,
+          amount: item.amountCents / 100,
+        })),
+      );
+
+      const reviewReasons: string[] = [...addOns.adminReviewReasons];
+      let propertyReviewCustomQuote = false;
+
+      if (
+        propertyCondition === "heavy" &&
+        validation.config.heavyCondition.enabled
+      ) {
+        reviewReasons.push("Heavy property condition");
+        propertyReviewCustomQuote =
+          validation.config.heavyCondition.requiresAdminApproval ||
+          !validation.config.heavyCondition.allowInstantBooking;
+      }
+
+      if (
+        cleaningPricingScope === "move_in_out" &&
+        formData.movePropertyEmpty === false
+      ) {
+        reviewReasons.push("Move-In / Move-Out property is not empty");
+        propertyReviewCustomQuote = true;
+      }
+
+      if (areaInput.unusualLayout) {
+        reviewReasons.push("Unusual property layout");
+      }
+
+      const adminReviewRequired =
+        reviewReasons.length > 0 ||
+        baseCustomQuote ||
+        carpetAddonCustomQuote ||
+        addOns.customQuote;
+      const photoReviewRequired =
+        validation.config.heavyCondition.allowPhotoUpload &&
+        (propertyCondition === "heavy" || addOns.adminReviewRequired);
+
+      if (photoReviewRequired && conditionPhotoPaths.length === 0) {
+        return NextResponse.json(
+          { error: "Please attach at least one condition photo for admin review." },
+          { status: 400 },
+        );
+      }
+
+      const subtotalCents =
+        baseSubtotalCents +
+        carpetAddonSubtotalCents +
+        addOns.subtotalCents;
+      const taxRate = validation.config.tax.enabled
+        ? validation.config.tax.rate
+        : 0;
+      const taxCents = Math.round(subtotalCents * taxRate);
+      customQuoteRequired =
+        baseCustomQuote ||
+        carpetAddonCustomQuote ||
+        addOns.customQuote ||
+        propertyReviewCustomQuote;
+      const customQuoteReason =
+        baseCustomQuoteReason ||
+        carpetAddonReason ||
+        addOns.customQuoteReason ||
+        reviewReasons[0] ||
+        null;
+
+      pricing = {
+        subtotal: subtotalCents / 100,
+        tax: taxCents / 100,
+        taxRate,
+        total: customQuoteRequired ? 0 : (subtotalCents + taxCents) / 100,
+        hours: 0,
+      };
+
+      const sanitizedSelectedAddOns = Object.fromEntries(
+        addOns.lineItems.map((item) => [item.id, item.quantity]),
+      );
+
+      persistedServiceData = {
+        ...formData,
+        customerName,
+        customerEmail,
+        customerPhone,
+        propertyType,
+        propertyCondition,
+        postalCode,
+        additionalInstructions,
+        conditionPhotoPaths,
+        selectedAddOns: sanitizedSelectedAddOns,
+        pricingScope: cleaningPricingScope,
+        ...(packageId ? { pricingPackageId: packageId } : {}),
+        ...(packageName ? { pricingPackageName: packageName } : {}),
+        ...(cleaningPricingScope === "standard" && packageId
+          ? { standardPackageId: packageId }
+          : {}),
+        ...(cleaningPricingScope === "standard" && packageName
+          ? { standardPackageName: packageName }
+          : {}),
+        customQuoteRequired,
+        customQuoteReason,
+        adminReviewRequired,
+        adminReviewReasons: Array.from(new Set(reviewReasons)),
+        adminNotificationRequired:
+          adminReviewRequired && validation.config.heavyCondition.notifyAdmin,
+        photoReviewRequired,
+        pricingVersion: pricingRow.version,
+        pricingBreakdown,
+        calculatedSubtotal: subtotalCents / 100,
+        calculatedTax: taxCents / 100,
+        calculatedTotal: (subtotalCents + taxCents) / 100,
+      };
+    } else {
+      pricing = calculatePricing(
+        service as Record<string, unknown>,
+        config,
+        formData,
+        pricingType,
+        safeNumber(body.hours, 3),
+      );
+    }
+
+    const adminReviewRequired = Boolean(
+      (persistedServiceData as Record<string, unknown>).adminReviewRequired,
     );
+    const initialStatus = customQuoteRequired
+      ? "custom_quote_required"
+      : adminReviewRequired
+        ? "under_review"
+        : "new_request";
 
     const jobRecord: Record<string, unknown> = {
       customer_id: body.isGuest ? null : user?.id ?? null,
@@ -288,12 +673,15 @@ export async function POST(request: NextRequest) {
       service_type: service.service_type,
       date: appointment.toISOString(),
       address,
-      billing_type: pricingType.toLowerCase(),
+      billing_type: effectivePricingType.toLowerCase(),
       total_price: pricing.total,
       tax_rate: pricing.taxRate,
-      price: `$${pricing.total.toFixed(2)}`,
-      status: "pending",
-      service_data: formData,
+      price: customQuoteRequired ? "Custom quote required" : `$${pricing.total.toFixed(2)}`,
+      status: initialStatus,
+      service_data: {
+        ...persistedServiceData,
+        bookingWorkflowStatus: initialStatus,
+      },
     };
 
     if (body.isGuest) {
@@ -306,7 +694,7 @@ export async function POST(request: NextRequest) {
       jobRecord.job_lng = body.coordinates.lng;
     }
 
-    if (pricingType === "Hourly") {
+    if (effectivePricingType === "Hourly") {
       jobRecord.estimated_hours = pricing.hours;
       jobRecord.hourly_rate = safeNumber(service.hourly_rate, 35);
     }
@@ -316,16 +704,49 @@ export async function POST(request: NextRequest) {
     }
     if (formData.washrooms !== undefined) {
       jobRecord.washrooms = Math.max(0, safeNumber(formData.washrooms));
+    } else if (formData.fullBathrooms !== undefined) {
+      jobRecord.washrooms = Math.max(0, safeNumber(formData.fullBathrooms));
     }
 
-    const { data: booking, error: insertError } = await admin
+    let { data: booking, error: insertError } = await admin
       .from("jobs")
       .insert(jobRecord)
       .select("id")
       .single();
 
+    // Backward-compatible fallback for deployments where the Phase 5 job_status
+    // enum migration has not been applied yet.  Keep the richer workflow state
+    // in service_data and use the legacy pending enum so a customer is never
+    // blocked from submitting a booking.
+    if (insertError?.code === "22P02" && String(insertError.message || "").includes("job_status")) {
+      const fallbackRecord = {
+        ...jobRecord,
+        status: "pending",
+        service_data: {
+          ...(jobRecord.service_data as Record<string, unknown>),
+          bookingWorkflowStatus: initialStatus,
+          databaseStatusFallback: "pending",
+        },
+      };
+      const retry = await admin
+        .from("jobs")
+        .insert(fallbackRecord)
+        .select("id")
+        .single();
+      booking = retry.data;
+      insertError = retry.error;
+    }
+
     if (insertError) {
       console.error("Booking API insert failed:", insertError);
+      return NextResponse.json(
+        { error: "We could not create the booking. Please try again." },
+        { status: 500 },
+      );
+    }
+
+    if (!booking?.id) {
+      console.error("Booking API insert returned no booking id.", { booking });
       return NextResponse.json(
         { error: "We could not create the booking. Please try again." },
         { status: 500 },
@@ -336,6 +757,9 @@ export async function POST(request: NextRequest) {
       ok: true,
       bookingId: booking.id,
       total: pricing.total,
+      customQuoteRequired,
+      adminReviewRequired,
+      status: initialStatus,
     });
   } catch (error) {
     const securityError = securityErrorResponse(error);

@@ -1,26 +1,30 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { motion, AnimatePresence, Variants } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  Building2,
-  Home,
-  Car,
-  CheckCircle2,
-  Clock,
   ArrowRight,
-  Sofa,
+  Building2,
+  CheckCircle2,
+  Home,
+  Info,
   Lock,
+  ShieldCheck,
+  Sofa,
+  Sparkles,
   X,
 } from "lucide-react";
-
-import CommonHeroSection from "@/components/common/CommonHeroSection";
-import BookingModal from "@/components/models/Booking";
-import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 
-// --- Types ---
+import BookingModal from "@/components/models/Booking";
+import { useAuth } from "@/hooks/useAuth";
+import type { CleaningPricingConfig } from "@/lib/pricing/config";
+import {
+  resolveCleaningPricingScope,
+  type CleaningPricingScope,
+} from "@/lib/pricing/serviceScope";
+
 export interface Category {
   id: string;
   name: string;
@@ -54,515 +58,630 @@ export interface Service {
 }
 
 interface BookingClientProps {
-  categories: Category[];
   services: Service[];
+  // Kept optional for backward compatibility with older booking pages
+  // and the customer-dashboard booking flow.
+  categories?: Category[];
 }
 
-const BookingClient = ({
-  categories: initialCategories,
-  services: initialServices,
-}: BookingClientProps) => {
-  const serviceImageMap: Record<string, string> = {
-    residential: "/residential.webp",
-    move_in_out: "/seasonal.webp",
-    commercial: "/commercial-cleaning.webp",
-    vehicle: "/vehicle.webp",
-    seasonal: "/seasonal.webp",
-    specialty: "/work.webp",
-  };
+type ServiceCardDefinition = {
+  scope: CleaningPricingScope;
+  eyebrow: string;
+  title: string;
+  priceLabel: string;
+  description: string;
+  features: string[];
+  badge?: string;
+  icon: React.ReactNode;
+  accentClass: string;
+  iconClass: string;
+  image: string;
+};
 
+const money0 = (cents: number) => `$${Math.round(cents / 100)}`;
+
+const BookingClient = ({ services }: BookingClientProps) => {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  const [activeCategory, setActiveCategory] = useState<string>("All");
+  const [publicPricing, setPublicPricing] = useState<CleaningPricingConfig | null>(null);
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [selectedServiceTitle, setSelectedServiceTitle] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGuestBooking, setIsGuestBooking] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [selectedServiceTitle, setSelectedServiceTitle] = useState("");
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [showPricingPopup, setShowPricingPopup] = useState(false);
 
-  const categories = initialCategories;
-  const services = initialServices;
+  useEffect(() => {
+    let cancelled = false;
 
-  const handleBookNow = (service: Service) => {
+    const loadPricing = async () => {
+      try {
+        const response = await fetch("/api/pricing", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { config?: CleaningPricingConfig };
+        if (!cancelled && payload.config) setPublicPricing(payload.config);
+      } catch {
+        // Keep the documented customer-facing fallback prices if the API is temporarily unavailable.
+      }
+    };
+
+    void loadPricing();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const serviceByScope = useMemo(() => {
+    const result: Partial<Record<CleaningPricingScope, Service>> = {};
+
+    for (const service of services) {
+      const scope = resolveCleaningPricingScope(service);
+      if (!scope) continue;
+
+      if (!result[scope]) {
+        result[scope] = service;
+        continue;
+      }
+
+      // Prefer an explicitly named Standard service over a generic residential row.
+      if (
+        scope === "standard" &&
+        /standard/i.test(service.title) &&
+        !/standard/i.test(result.standard?.title ?? "")
+      ) {
+        result.standard = service;
+      }
+    }
+
+    return result;
+  }, [services]);
+
+  const standardEssential =
+    publicPricing?.services.standard.packages.find(
+      (pkg) => pkg.id === "essential_standard",
+    )?.basePriceCents ?? 9900;
+  const standardComplete =
+    publicPricing?.services.standard.packages.find(
+      (pkg) => pkg.id === "complete_standard",
+    )?.basePriceCents ?? 14900;
+  const deepStart = publicPricing?.services.deep.startingPriceCents ?? 15900;
+  const moveStart = publicPricing?.services.move_in_out.startingPriceCents ?? 19900;
+  const carpetMinimum = publicPricing?.carpet.standaloneMinimumCents ?? 10000;
+
+  const serviceCards: ServiceCardDefinition[] = [
+    {
+      scope: "standard",
+      eyebrow: "Standard Cleaning",
+      title: "Essential & Complete Standard Clean",
+      priceLabel: `From ${money0(standardEssential)}`,
+      description:
+        "Choose the package that fits your home, then customize rooms and optional services with a live price update.",
+      features: [
+        `Essential: 1 bedroom + 1 full bathroom + kitchen + living area — ${money0(standardEssential)}`,
+        `Complete: up to 2 bedrooms + 2 full bathrooms + kitchen + living area — ${money0(standardComplete)}`,
+        "Vacuuming or sweeping and mopping in included areas",
+        "Additional rooms are charged only when they exceed the package allowance",
+      ],
+      badge: "Most flexible",
+      icon: <Home className="h-7 w-7" />,
+      accentClass: "border-blue-200 bg-blue-50/70",
+      iconClass: "bg-blue-600 text-white",
+      image: "/wp-admin/uploads/cleaned kitchen.webp",
+    },
+    {
+      scope: "deep",
+      eyebrow: "Deep Cleaning",
+      title: "Detailed Deep Clean",
+      priceLabel: `From ${money0(deepStart)}`,
+      description:
+        "A dedicated deep-cleaning price based on property size, with extra attention to detailed surfaces and buildup.",
+      features: [
+        "Detailed baseboards, door frames, doors and switches",
+        "Edges and corners with detailed bathroom attention",
+        "Dedicated Deep Cleaning room increments",
+        "Price increases according to the actual property size",
+      ],
+      icon: <Sparkles className="h-7 w-7" />,
+      accentClass: "border-violet-200 bg-violet-50/70",
+      iconClass: "bg-violet-600 text-white",
+      image: "/wp-admin/uploads/Room cleaning.webp",
+    },
+    {
+      scope: "move_in_out",
+      eyebrow: "Move-In / Move-Out",
+      title: "Empty-Home Turnover Clean",
+      priceLabel: `From ${money0(moveStart)}`,
+      description:
+        "Designed for empty properties with size-based tiers and selected inside-appliance and cabinet cleaning already included.",
+      features: [
+        "Baseboards, doors, frames, switches and accessible floors",
+        "Inside empty refrigerator and microwave included",
+        "Inside oven in normal condition included",
+        "Inside empty kitchen cabinets and drawers included",
+      ],
+      icon: <Building2 className="h-7 w-7" />,
+      accentClass: "border-cyan-200 bg-cyan-50/70",
+      iconClass: "bg-cyan-600 text-white",
+      image: "/wp-admin/uploads/residential-hero.webp",
+    },
+    {
+      scope: "carpet",
+      eyebrow: "Carpet Steam Cleaning",
+      title: "Standalone or Add-On Carpet Care",
+      priceLabel: `${money0(carpetMinimum)} minimum`,
+      description:
+        "Select carpeted rooms and areas individually. Standalone carpet cleaning always respects the minimum service price.",
+      features: [
+        "Standard carpeted rooms",
+        "Living/larger rooms, hallways and carpeted stairs",
+        "Small area rugs and heavy stain treatment",
+        "Pet urine or odour treatment is sent for a custom quote",
+      ],
+      icon: <Sofa className="h-7 w-7" />,
+      accentClass: "border-emerald-200 bg-emerald-50/70",
+      iconClass: "bg-emerald-600 text-white",
+      image: "/wp-admin/uploads/cleaned floor.webp",
+    },
+  ];
+
+  const beginBooking = (scope: CleaningPricingScope) => {
     if (authLoading) return;
 
+    const service = serviceByScope[scope];
+    if (!service) return;
+
+    setSelectedService(service);
+    setSelectedServiceTitle(
+      serviceCards.find((card) => card.scope === scope)?.eyebrow ?? service.title,
+    );
+
     if (!user) {
-      setSelectedService(service);
-      setSelectedServiceTitle(service.title);
       setShowLoginPrompt(true);
       return;
     }
 
-    setSelectedService(service);
-    setSelectedServiceTitle(service.title);
     setIsGuestBooking(false);
     setIsModalOpen(true);
   };
 
-  const getIconForCategory = (iconStr: string) => {
-    switch (iconStr) {
-      case "home":
-        return <Home className="h-8 w-8" />;
-
-      case "building2":
-        return <Building2 className="h-8 w-8" />;
-
-      case "truck":
-        return <Car className="h-8 w-8" />;
-
-      case "sparkles":
-        return <Sofa className="h-8 w-8" />;
-
-      default:
-        return <Home className="h-8 w-8" />;
-    }
-  };
-
-  const getIconForService = (iconStr: string) => {
-    switch (iconStr) {
-      case "home":
-        return <Home className="h-5 w-5 text-blue-600" />;
-
-      case "building2":
-        return <Building2 className="h-5 w-5 text-blue-600" />;
-
-      case "truck":
-        return <Car className="h-5 w-5 text-blue-600" />;
-
-      case "sparkles":
-        return <Sofa className="h-5 w-5 text-blue-600" />;
-
-      default:
-        return <Home className="h-5 w-5 text-blue-600" />;
-    }
-  };
-
-  const getCategoryDescription = (name: string) => {
-    const descriptions: Record<string, string> = {
-      Residential: "Home cleaning services",
-      Commercial: "Workplace cleaning services",
-      Vehicle: "Mobile vehicle cleaning",
-      "Seasonal Property": "Seasonal property cleaning services",
-      Specialty: "Additional cleaning services",
-    };
-
-    return descriptions[name] || name;
-  };
-
-  const getServiceDuration = (service: Service) => {
-    if (service.pricing_type === "hourly") {
-      return "Flexible";
-    }
-
-    return "Duration varies";
-  };
-
-  const getServiceFeatures = (serviceType: string): string[] => {
-    const featureMap: Record<string, string[]> = {
-      residential: [
-        "Cleaning scope reviewed",
-        "Home details confirmed",
-        "Preferred appointment",
-        "Special requests can be added",
-      ],
-
-      move_in_out: [
-        "Property condition reviewed",
-        "Requested areas confirmed",
-        "Access details provided",
-        "Preferred appointment",
-      ],
-
-      commercial: [
-        "Property scope reviewed",
-        "Cleaning requirements confirmed",
-        "Schedule preferences",
-        "Special requests can be added",
-      ],
-
-      vehicle: [
-        "Vehicle details reviewed",
-        "Selected cleaning package",
-        "Location and parking details",
-        "Preferred appointment",
-      ],
-
-      specialty: [
-        "Requested service reviewed",
-        "Scope confirmed before service",
-        "Preferred appointment",
-        "Special requests can be added",
-      ],
-    };
-
-    return (
-      featureMap[serviceType] || [
-        "Service scope reviewed",
-        "Details confirmed before service",
-      ]
-    );
-  };
-
-  const getActiveCategoryName = () => {
-    if (activeCategory === "All") {
-      return "All";
-    }
-
-    const category = categories.find((item) => item.id === activeCategory);
-
-    return category?.name || "All";
-  };
-
-  const filteredServices =
-    activeCategory === "All"
-      ? services
-      : services.filter((service) => service.category_id === activeCategory);
-
-  const cardVariants: Variants = {
-    hidden: {
-      opacity: 0,
-      y: 20,
-    },
-
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 0.5,
-      },
-    },
+  const scrollToServices = () => {
+    document.getElementById("cleaning-services")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   };
 
   return (
-    <>
-      {/* Hero */}
-      <CommonHeroSection
-        backgroundImage="/p4.webp"
-        title={<>Book a Cleaning Service Online</>}
-      />
+    <main className="min-h-screen bg-slate-50 pb-24">
+      <section className="relative overflow-hidden border-b border-slate-200 bg-white px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
+        <motion.div
+          aria-hidden="true"
+          animate={{ x: [0, 18, 0], y: [0, 10, 0], scale: [1, 1.05, 1] }}
+          transition={{ duration: 11, repeat: Infinity, ease: "easeInOut" }}
+          className="pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-blue-100/70 blur-3xl"
+        />
+        <motion.div
+          aria-hidden="true"
+          animate={{ x: [0, -16, 0], y: [0, -8, 0], scale: [1, 1.04, 1] }}
+          transition={{ duration: 13, repeat: Infinity, ease: "easeInOut" }}
+          className="pointer-events-none absolute -right-20 bottom-0 h-80 w-80 rounded-full bg-cyan-100/70 blur-3xl"
+        />
 
-      <main className="min-h-screen bg-[#F8FAFC] px-6 py-6 pb-32 md:px-12 lg:px-24">
-        <div className="container-custom mx-auto">
-          {/* Page Introduction */}
-          <div className="mx-auto max-w-4xl text-center">
-            <span className="rounded-full bg-[#00B7EB] px-4 py-1 text-sm font-bold uppercase text-white">
-              Online Booking
-            </span>
+        <div className="relative mx-auto grid max-w-6xl gap-10 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -24 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+          >
+            <motion.h1
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.08 }}
+              className="max-w-3xl text-4xl font-black leading-[1.05] text-slate-950 sm:text-5xl lg:text-[3.45rem]"
+            >
+              Professional Home Cleaning From {money0(standardEssential)}
+            </motion.h1>
 
-            <h2 className="mb-4 mt-6 text-4xl font-extrabold text-[#004A8C] md:text-5xl">
-              Choose Your Service and Preferred Appointment
-            </h2>
+            <motion.p
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.16 }}
+              className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg"
+            >
+              Our {money0(standardEssential)} Essential Standard Clean is a real package for 1 bedroom,
+              1 full bathroom, 1 kitchen and 1 living area. Customize your home and see the updated
+              price before you confirm.
+            </motion.p>
 
-            <p className="mx-auto max-w-3xl leading-7 text-gray-600">
-              Select the cleaning service you need, provide the required details
-              and choose your preferred appointment. Camz Cleaning reviews the
-              request before confirming availability, scope and price.
-            </p>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.24 }}
+              className="mt-8 flex flex-col gap-3 sm:flex-row"
+            >
+              <button
+                type="button"
+                onClick={scrollToServices}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0B4E9B] px-6 py-3.5 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-[#073f7d] active:scale-[0.985]"
+              >
+                Choose a service
+                <ArrowRight className="h-4 w-4" />
+              </button>
 
-            <div className="mx-auto mt-6 max-w-3xl rounded-xl border border-blue-100 bg-blue-50 px-5 py-4">
-              <p className="text-sm font-medium leading-6 text-[#0B4E9B]">
-                A submitted request is not a confirmed appointment until Camz
-                Cleaning reviews it and sends confirmation.
-              </p>
+              <button
+                type="button"
+                onClick={() => setShowPricingPopup(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.985]"
+              >
+                <Info className="h-4 w-4 text-blue-600" />
+                How pricing works
+              </button>
+            </motion.div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 28, scale: 0.96 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            transition={{ duration: 0.65, delay: 0.08, ease: "easeOut" }}
+            className="relative mx-auto w-full max-w-[520px]"
+          >
+            <motion.div
+              animate={{ y: [0, -6, 0] }}
+              whileHover={{ scale: 1.012 }}
+              transition={{ y: { duration: 5.5, repeat: Infinity, ease: "easeInOut" }, scale: { duration: 0.22 } }}
+              className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl shadow-slate-300/40"
+            >
+              <div className="relative aspect-[5/4] bg-gradient-to-br from-blue-50 to-cyan-50">
+                <Image
+                  src="/Banner-Image.webp"
+                  alt="Camz Cleaning professional cleaner"
+                  fill
+                  priority
+                  sizes="(max-width: 1024px) 92vw, 520px"
+                  className="object-cover object-center"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/15 via-transparent to-transparent" />
+              </div>
+
+              <div className="border-t border-slate-200 bg-white px-5 py-4">
+                <p className="text-sm font-semibold text-slate-700">
+                  Starting from <span className="font-black text-[#0B4E9B]">{money0(standardEssential)}</span> for 1 bedroom, 1 bathroom, 1 kitchen and 1 living area.
+                </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        </div>
+      </section>
+
+      <section className="relative z-10 -mt-2 px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.18 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="mx-auto max-w-6xl rounded-[2rem] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60 sm:p-7 lg:p-8"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
+                How your price is built
+              </span>
+              <h2 className="mt-2 text-[2rem] font-black leading-tight text-slate-950 sm:text-[2.5rem]">
+                Four simple steps from service to final total
+              </h2>
             </div>
+            <p className="max-w-xl text-sm leading-6 text-slate-500">
+              Pick a plan, tailor it to your property and see every charge before you submit.
+            </p>
           </div>
 
-          {/* Category Cards */}
-          <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-            {categories.map((cat) => {
-              const isActive = activeCategory === cat.id;
+          <div className="relative mt-8">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {[
+                {
+                  number: "01",
+                  title: "Select service",
+                  copy: "Pick the cleaning type that matches your home and the result you need.",
+                  icon: <Home className="h-5 w-5" />,
+                  tone: "bg-blue-50 text-blue-700",
+                },
+                {
+                  number: "02",
+                  title: "Customize property",
+                  copy: "Add bedrooms, bathrooms, extra areas and only the add-ons that apply.",
+                  icon: <Sparkles className="h-5 w-5" />,
+                  tone: "bg-violet-50 text-violet-700",
+                },
+                {
+                  number: "03",
+                  title: "See live total",
+                  copy: "Watch your subtotal and GST update instantly as you tailor the service.",
+                  icon: <ShieldCheck className="h-5 w-5" />,
+                  tone: "bg-emerald-50 text-emerald-700",
+                },
+                {
+                  number: "04",
+                  title: "Review & submit",
+                  copy: "Check every detail, make edits if needed, then send your booking request.",
+                  icon: <CheckCircle2 className="h-5 w-5" />,
+                  tone: "bg-amber-50 text-amber-700",
+                },
+              ].map((step, index, arr) => (
+                <div key={step.number} className="relative">
+                  <motion.article
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.25 }}
+                    transition={{ duration: 0.4, delay: index * 0.06 }}
+                    whileHover={{ y: -4 }}
+                    className="relative h-full rounded-[1.45rem] border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${step.tone}`}>
+                        {step.icon}
+                      </div>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-black tracking-[0.16em] text-slate-500">
+                        {step.number}
+                      </span>
+                    </div>
+                    <h3 className="mt-6 text-[1.6rem] font-black leading-tight text-slate-900">{step.title}</h3>
+                    <p className="mt-3 text-[15px] leading-7 text-slate-600">{step.copy}</p>
+                  </motion.article>
+
+                  {index < arr.length - 1 && (
+                    <motion.div
+                      aria-hidden="true"
+                      animate={{ x: [0, 4, 0] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut", delay: index * 0.12 }}
+                      className="pointer-events-none absolute -right-2 top-1/2 z-10 hidden -translate-y-1/2 xl:flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm"
+                    >
+                      <ArrowRight className="h-4 w-4" />
+                    </motion.div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+      </section>
+
+      <section id="cleaning-services" className="scroll-mt-24 px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
+        <div className="mx-auto max-w-6xl">
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, amount: 0.5 }}
+            transition={{ duration: 0.45 }}
+            className="mx-auto max-w-3xl text-center"
+          >
+            <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
+              Step 1 — Select Cleaning Service
+            </span>
+            <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl">
+              Choose the service that matches your property
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Starting prices are shown with their real included scope. Your total updates when you
+              select additional rooms, services or carpet areas.
+            </p>
+          </motion.div>
+
+          <div className="mx-auto mt-10 grid max-w-4xl gap-5 lg:grid-cols-2">
+            {serviceCards.map((card, index) => {
+              const available = Boolean(serviceByScope[card.scope]);
 
               return (
-                <div
-                  key={cat.id}
-                  onClick={() =>
-                    setActiveCategory(isActive ? "All" : cat.id)
-                  }
-                  className={`relative min-h-[220px] cursor-pointer overflow-hidden rounded-[22px] border bg-[#0B4E9B] p-6 transition-all duration-300 ${
-                    isActive
-                      ? "border-white ring-2 ring-[#2F80FF]"
-                      : "border-transparent"
-                  }`}
+                <motion.article
+                  key={card.scope}
+                  initial={{ opacity: 0, y: 18 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.2 }}
+                  transition={{ duration: 0.4, delay: index * 0.06 }}
+                  whileHover={{ y: -5 }}
+                  className={`group relative flex h-full flex-col rounded-[1.4rem] border p-5 shadow-sm transition-shadow hover:shadow-xl sm:p-6 ${card.accentClass}`}
                 >
-                  {/* Selected */}
-                  {isActive && (
-                    <div className="absolute right-5 top-5">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white">
-                        <svg
-                          viewBox="0 0 24 24"
-                          className="h-4 w-4 fill-current text-[#2F80FF]"
-                        >
-                          <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                        </svg>
-                      </div>
+                  <div className="relative mb-5 h-36 overflow-hidden rounded-2xl">
+                    <Image
+                      src={card.image}
+                      alt={card.eyebrow}
+                      fill
+                      sizes="(max-width: 1024px) 100vw, 420px"
+                      className="object-cover transition duration-500 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/35 to-transparent" />
+                    <div className={`absolute bottom-3 left-3 flex h-11 w-11 items-center justify-center rounded-xl shadow-lg ${card.iconClass}`}>
+                      {card.icon}
                     </div>
-                  )}
-
-                  {/* Icon */}
-                  <div className="mb-8">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/15 text-white">
-                      {getIconForCategory(cat.icon_str)}
-                    </div>
+                    {card.badge && (
+                      <span className="absolute right-3 top-3 rounded-full bg-white/95 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-700 shadow-sm backdrop-blur">
+                        {card.badge}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Title */}
-                  <h3 className="mb-3 text-3xl font-bold leading-tight text-white">
-                    {cat.name}
-                  </h3>
+                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="pr-2">
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                        {card.eyebrow}
+                      </p>
+                      <h3 className="mt-1 text-xl font-black leading-tight text-slate-900 sm:text-[1.35rem]">
+                        {card.title}
+                      </h3>
+                    </div>
+                    <span className="w-fit shrink-0 rounded-full bg-white px-4 py-2 text-sm font-black text-[#073f7d] shadow-sm">
+                      {card.priceLabel}
+                    </span>
+                  </div>
 
-                  {/* Description */}
-                  <p className="mb-8 leading-7 text-white/80">
-                    {getCategoryDescription(cat.name)}
-                  </p>
-                </div>
+                  <p className="mt-4 leading-7 text-slate-600">{card.description}</p>
+
+                  <ul className="mt-5 space-y-3">
+                    {card.features.map((feature) => (
+                      <li key={feature} className="flex gap-3 text-sm leading-6 text-slate-700">
+                        <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-blue-600" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-auto pt-7">
+                    <button
+                      type="button"
+                      onClick={() => beginBooking(card.scope)}
+                      disabled={!available || authLoading}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4E9B] px-5 py-3.5 text-sm font-black text-white shadow-sm transition hover:bg-[#073f7d] active:scale-[0.985] disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {available ? "Customize & see price" : "Service unavailable"}
+                      {available && <ArrowRight className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </motion.article>
               );
             })}
           </div>
-
-          {/* Services Heading */}
-          <div className="mt-12 text-center">
-            <h2 className="text-4xl font-bold text-[#004A8C]">
-              {getActiveCategoryName()} Services
-            </h2>
-
-            <p className="my-4 text-gray-500">
-              Review the available services below and choose the option that
-              matches your cleaning needs.
-            </p>
-          </div>
-
-          {/* Services Grid */}
-          <motion.div
-            layout
-            className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3"
-          >
-            {filteredServices.map((service) => (
-              <motion.div
-                key={service.id}
-                variants={cardVariants}
-                initial="hidden"
-                whileInView="visible"
-                viewport={{ once: true }}
-                className="flex flex-col overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-lg"
-              >
-                {/* Image */}
-                <div className="relative h-64 w-full">
-                  <Image
-                    src={
-                      serviceImageMap[service.service_type] || "/p4.webp"
-                    }
-                    alt={service.title}
-                    fill
-                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                    className="object-cover"
-                  />
-
-                  {/* Price */}
-                  <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-sm font-bold text-gray-800 shadow-sm backdrop-blur">
-                    {service.price}
-                  </div>
-
-                  {/* Duration */}
-                  <div className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-[#0B4E9B]/90 px-3 py-1 text-sm font-bold text-white shadow-sm backdrop-blur">
-                    <Clock size={14} />
-                    {getServiceDuration(service)}
-                  </div>
-                </div>
-
-                {/* Content */}
-                <div className="flex grow flex-col p-8">
-                  <div className="mb-4 flex items-center gap-2">
-                    {getIconForService(service.icon_str)}
-
-                    <h3 className="text-2xl font-extrabold text-[#004A8C]">
-                      {service.title}
-                    </h3>
-                  </div>
-
-                  <p className="mb-6 text-gray-500">
-                    {service.description}
-                  </p>
-
-                  {/* Features */}
-                  <ul className="mb-8 space-y-3">
-                    {getServiceFeatures(service.service_type).map(
-                      (feature, index) => (
-                        <li
-                          key={`${service.id}-${feature}-${index}`}
-                          className="flex items-center gap-2 text-sm font-medium text-gray-600"
-                        >
-                          <CheckCircle2
-                            size={18}
-                            className="shrink-0 text-[#1F5BA0]"
-                          />
-
-                          <span>{feature}</span>
-                        </li>
-                      ),
-                    )}
-                  </ul>
-
-                  {/* Book Button */}
-                  <button
-                    onClick={() => handleBookNow(service)}
-                    disabled={authLoading}
-                    className="group mt-auto flex cursor-pointer items-center gap-2 font-bold text-[#1F5BA0] transition-colors hover:text-[#004A8C] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Book now
-
-                    <ArrowRight
-                      size={20}
-                      className="transition-transform group-hover:translate-x-1"
-                    />
-                  </button>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-
-          {/* Empty State */}
-          {filteredServices.length === 0 && (
-            <div className="py-20 text-center text-gray-400">
-              No services found in this category yet.
-            </div>
-          )}
         </div>
+      </section>
 
-        {/* Booking Modal */}
-        <BookingModal
-          isOpen={isModalOpen}
-          onClose={() => {
-            setIsModalOpen(false);
-            setIsGuestBooking(false);
-          }}
-          service={selectedService}
-          isGuest={isGuestBooking}
-        />
 
-        {/* Login Required Modal */}
-        <AnimatePresence>
-          {showLoginPrompt && (
+      <AnimatePresence>
+        {showPricingPopup && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 px-4"
+            onClick={() => setShowPricingPopup(false)}
+          >
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-md"
-              onClick={() => setShowLoginPrompt(false)}
+              initial={{ opacity: 0, y: 20, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ duration: 0.2 }}
+              className="relative w-full max-w-lg rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-2xl sm:p-7"
+              onClick={(e) => e.stopPropagation()}
             >
-              <motion.div
-                initial={{
-                  opacity: 0,
-                  y: 20,
-                  scale: 0.95,
-                }}
-                animate={{
-                  opacity: 1,
-                  y: 0,
-                  scale: 1,
-                }}
-                exit={{
-                  opacity: 0,
-                  y: 20,
-                  scale: 0.95,
-                }}
-                onClick={(event) => event.stopPropagation()}
-                className="relative w-full max-w-md overflow-hidden rounded-[2rem] bg-white p-8 shadow-2xl"
+              <button
+                type="button"
+                onClick={() => setShowPricingPopup(false)}
+                className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800"
+                aria-label="Close pricing info"
               >
-                {/* Close */}
-                <button
-                  onClick={() => setShowLoginPrompt(false)}
-                  className="absolute right-5 top-5 flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 transition-all hover:bg-slate-200"
-                  aria-label="Close"
-                >
-                  <X size={16} className="text-slate-600" />
-                </button>
+                <X className="h-4 w-4" />
+              </button>
 
-                <div className="text-center">
-                  {/* Icon */}
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{
-                      delay: 0.1,
-                      type: "spring",
-                      stiffness: 200,
-                    }}
-                    className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-blue-50"
-                  >
-                    <Lock className="h-10 w-10 text-blue-600" />
-                  </motion.div>
+              <div className="pr-10">
+                <span className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">
+                  Pricing information
+                </span>
+                <h3 className="mt-2 text-2xl font-black text-slate-900">How pricing works</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  Each cleaning service has its own plan and included scope. Optional add-ons are charged separately only when you select them.
+                </p>
+              </div>
 
-                  <h2 className="mb-2 text-2xl font-black text-slate-800">
-                    Login Required
-                  </h2>
-
-                  <p className="mb-2 text-sm text-slate-500">
-                    Please log in to book{" "}
-                    <span className="font-bold text-blue-600">
-                      {selectedServiceTitle}
-                    </span>
-                  </p>
-
-                  <p className="mb-8 text-xs text-slate-400">
-                    Your account helps us track your bookings and provide better
-                    service.
-                  </p>
-
-                  <div className="flex flex-col gap-3">
-                    {/* Login */}
-                    <button
-                      onClick={() => {
-                        setShowLoginPrompt(false);
-                        router.push("/login?redirect=/booking");
-                      }}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-black text-white shadow-xl shadow-blue-100 transition-all hover:bg-blue-700"
-                    >
-                      Continue to Login
-                      <ArrowRight size={16} />
-                    </button>
-
-                    {/* Guest */}
-                    <button
-                      onClick={() => {
-                        setShowLoginPrompt(false);
-                        setIsGuestBooking(true);
-                        setIsModalOpen(true);
-                      }}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-800 py-3.5 text-sm font-black text-white transition-all hover:bg-slate-900"
-                    >
-                      Continue as Guest
-                      <ArrowRight size={16} />
-                    </button>
-
-                    {/* Cancel */}
-                    <button
-                      onClick={() => setShowLoginPrompt(false)}
-                      className="w-full rounded-xl border border-slate-200 py-3 text-sm font-bold text-slate-600 transition-all hover:bg-slate-50"
-                    >
-                      Maybe Later
-                    </button>
+              <div className="mt-6 space-y-3">
+                {[
+                  "Live pricing updates as you customize your booking",
+                  "Applicable GST is shown before confirmation",
+                  "Optional add-ons are charged only when selected",
+                  "Included services are not charged twice",
+                ].map((item) => (
+                  <div key={item} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-blue-100">
+                      <CheckCircle2 className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <span className="text-sm font-semibold leading-6 text-slate-700">{item}</span>
                   </div>
-
-                  <p className="mt-6 text-[11px] text-slate-400">
-                    Don&apos;t have an account?{" "}
-                    <button
-                      onClick={() => {
-                        setShowLoginPrompt(false);
-                        router.push("/register");
-                      }}
-                      className="font-bold text-blue-600 hover:underline"
-                    >
-                      Sign up
-                    </button>
-                  </p>
-                </div>
-              </motion.div>
+                ))}
+              </div>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
-    </>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <BookingModal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setIsGuestBooking(false);
+        }}
+        service={selectedService}
+        isGuest={isGuestBooking}
+      />
+
+      <AnimatePresence>
+        {showLoginPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+            onClick={() => setShowLoginPrompt(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 18, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.97 }}
+              onClick={(event) => event.stopPropagation()}
+              className="relative w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl sm:p-8"
+            >
+              <button
+                type="button"
+                onClick={() => setShowLoginPrompt(false)}
+                className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                <Lock className="h-7 w-7" />
+              </div>
+              <div className="mt-5 text-center">
+                <h2 className="text-2xl font-black text-slate-900">Continue your booking</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Customize <span className="font-bold text-blue-700">{selectedServiceTitle}</span> as
+                  a guest, or log in to keep the booking in your account.
+                </p>
+              </div>
+
+              <div className="mt-7 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLoginPrompt(false);
+                    setIsGuestBooking(true);
+                    setIsModalOpen(true);
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4E9B] py-3.5 text-sm font-black text-white transition hover:bg-[#073f7d]"
+                >
+                  Continue as Guest
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLoginPrompt(false);
+                    router.push("/login?redirect=/booking");
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-3.5 text-sm font-black text-slate-700 transition hover:bg-slate-50"
+                >
+                  Log in to continue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPrompt(false)}
+                  className="w-full py-2 text-sm font-bold text-slate-400 hover:text-slate-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </main>
   );
 };
 

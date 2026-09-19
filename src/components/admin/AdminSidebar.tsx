@@ -8,6 +8,7 @@ import {
   BarChart3,
   BookOpen,
   CalendarDays,
+  Calculator,
   ClipboardCheck,
   ClipboardList,
   GalleryHorizontal,
@@ -94,6 +95,12 @@ const groups: AdminGroup[] = [
         label: "Services",
         href: "/admin-dashboard/services",
         icon: Wrench,
+      },
+      {
+        label: "Pricing Settings",
+        href: "/admin-dashboard/pricing-settings",
+        icon: Calculator,
+        roles: ["admin"],
       },
       {
         label: "All Users",

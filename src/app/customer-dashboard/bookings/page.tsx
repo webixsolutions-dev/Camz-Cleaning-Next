@@ -21,22 +21,33 @@ interface Job {
   status: string;
   billing_type: string;
   created_at: string;
+  service_data: Record<string, any> | null;
 }
 
 // Map UI tab name to DB status values
 const tabToStatus: Record<string, string[]> = {
   All: [],
-  Pending: ["pending"],
-  Active: ["assigned", "in_progress", "accepted"],
+  Pending: [
+    "pending",
+    "new_request",
+    "under_review",
+    "awaiting_photos",
+    "quote_sent",
+    "custom_quote_required",
+  ],
+  Active: ["approved", "booking_confirmed", "assigned", "in_progress", "accepted"],
   History: ["completed"],
-  Cancel: ["cancelled", "canceled"],
+  Cancel: ["cancelled", "canceled", "rejected"],
 };
 
 // Get color class based on status
 const getStatusStyle = (status: string): string => {
   const s = status.toLowerCase();
-  if (s === "pending") return "bg-amber-50 text-amber-700";
-  if (s === "assigned" || s === "in_progress" || s === "accepted")
+  if (["pending", "new_request"].includes(s)) return "bg-sky-50 text-sky-700";
+  if (["under_review", "awaiting_photos", "custom_quote_required"].includes(s))
+    return "bg-amber-50 text-amber-700";
+  if (s === "quote_sent") return "bg-violet-50 text-violet-700";
+  if (["approved", "booking_confirmed", "assigned", "in_progress", "accepted"].includes(s))
     return "bg-blue-50 text-blue-700";
   if (s === "completed") return "bg-emerald-50 text-emerald-700";
   if (s === "cancelled" || s === "canceled")

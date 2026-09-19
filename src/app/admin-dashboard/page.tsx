@@ -123,8 +123,16 @@ export default async function AdminDashboardPage() {
     (job) => job.status?.toLowerCase() === "completed",
   ).length;
 
-  const pending = allJobs.filter(
-    (job) => job.status?.toLowerCase() === "pending",
+  const pendingStatuses = new Set([
+    "pending",
+    "new_request",
+    "under_review",
+    "awaiting_photos",
+    "quote_sent",
+    "custom_quote_required",
+  ]);
+  const pending = allJobs.filter((job) =>
+    pendingStatuses.has(String(job.status || "").toLowerCase()),
   ).length;
 
   const total = allJobs.length;

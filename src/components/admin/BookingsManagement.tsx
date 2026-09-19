@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import BookingQuoteManager from "@/components/admin/BookingQuoteManager";
 import {
   ArrowLeft,
   CalendarDays,
@@ -16,6 +17,9 @@ import {
   UserCheck,
   UserPlus,
   XCircle,
+  AlertTriangle,
+  FileImage,
+  Home,
 } from "lucide-react";
 
 export type BookingRecord = {
@@ -29,14 +33,17 @@ export type BookingRecord = {
   price: string | number | null;
   final_price: string | number | null;
   total_price: string | number | null;
+  tax_rate: string | number | null;
   status: string | null;
   created_at: string;
   payment_method: string | null;
   billing_type: string | null;
   booking_type: string | null;
   customer_name: string;
+  customer_email: string;
   customer_phone: string;
   cleaner_name: string;
+  service_data?: Record<string, any> | null;
 };
 
 export type CleanerOption = {
@@ -58,8 +65,10 @@ export type CleanerOption = {
 
 type StatusFilter =
   | "All"
-  | "Pending"
-  | "Assigned"
+  | "New"
+  | "Review"
+  | "Quote Sent"
+  | "Confirmed"
   | "Completed"
   | "Cancelled";
 
@@ -67,8 +76,10 @@ type RangeFilter = "24h" | "7d" | "30d" | "all";
 
 const statusTabs: StatusFilter[] = [
   "All",
-  "Pending",
-  "Assigned",
+  "New",
+  "Review",
+  "Quote Sent",
+  "Confirmed",
   "Completed",
   "Cancelled",
 ];
@@ -81,12 +92,18 @@ const rangeTabs: Array<{ key: RangeFilter; label: string }> = [
 ];
 
 function money(booking: BookingRecord) {
-  const value =
-    booking.total_price || booking.final_price || booking.price || 0;
-
-  const numeric = Number(value);
-
-  return `CAD $${Number.isFinite(numeric) ? numeric.toFixed(2) : value}`;
+  const rawCandidates = [booking.total_price, booking.final_price, booking.price];
+  for (const value of rawCandidates) {
+    if (value === null || value === undefined || value === "") continue;
+    if (typeof value === "string" && /custom quote/i.test(value)) {
+      return "Custom quote required";
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return `CAD $${numeric.toFixed(2)}`;
+  }
+  return booking.service_data?.customQuoteRequired
+    ? "Custom quote required"
+    : "CAD $0.00";
 }
 
 function shortOrder(id: string) {
@@ -105,10 +122,27 @@ function isCompleted(status: string | null) {
   return ["completed", "complete"].includes(normalizeStatus(status));
 }
 
-function isAssigned(status: string | null) {
-  return ["assigned", "accepted", "in_progress"].includes(
+function isConfirmed(status: string | null) {
+  return ["approved", "booking_confirmed", "assigned", "accepted", "in_progress"].includes(
     normalizeStatus(status),
   );
+}
+
+function isReview(status: string | null) {
+  return ["under_review", "awaiting_photos", "custom_quote_required"].includes(
+    normalizeStatus(status),
+  );
+}
+
+function isNew(status: string | null) {
+  return ["pending", "new_request"].includes(normalizeStatus(status));
+}
+
+function formatStatus(status: string | null) {
+  return normalizeStatus(status)
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function matchesStatus(
@@ -116,12 +150,12 @@ function matchesStatus(
   filter: StatusFilter,
 ) {
   if (filter === "All") return true;
-
   if (filter === "Completed") return isCompleted(bookingStatus);
   if (filter === "Cancelled") return isCancelled(bookingStatus);
-  if (filter === "Assigned") return isAssigned(bookingStatus);
-
-  return normalizeStatus(bookingStatus) === "pending";
+  if (filter === "Confirmed") return isConfirmed(bookingStatus);
+  if (filter === "Review") return isReview(bookingStatus);
+  if (filter === "Quote Sent") return normalizeStatus(bookingStatus) === "quote_sent";
+  return isNew(bookingStatus);
 }
 
 function statusTone(status: string | null) {
@@ -135,12 +169,20 @@ function statusTone(status: string | null) {
     return "border-rose-100 bg-rose-50 text-rose-700";
   }
 
-  if (isAssigned(status)) {
+  if (isConfirmed(status)) {
     return "border-blue-100 bg-blue-50 text-blue-700";
   }
 
-  if (normalized === "pending") {
-    return "border-amber-100 bg-amber-50 text-amber-700";
+  if (normalized === "quote_sent") {
+    return "border-violet-100 bg-violet-50 text-violet-700";
+  }
+
+  if (isReview(status)) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  if (isNew(status)) {
+    return "border-sky-100 bg-sky-50 text-sky-700";
   }
 
   return "border-slate-200 bg-slate-100 text-slate-600";
@@ -149,8 +191,11 @@ function statusTone(status: string | null) {
 function statusDot(status: string | null) {
   if (isCompleted(status)) return "bg-emerald-500";
   if (isCancelled(status)) return "bg-rose-500";
-  if (isAssigned(status)) return "bg-blue-500";
-  return "bg-amber-500";
+  if (isConfirmed(status)) return "bg-blue-500";
+  if (normalizeStatus(status) === "quote_sent") return "bg-violet-500";
+  if (isReview(status)) return "bg-amber-500";
+  if (isNew(status)) return "bg-sky-500";
+  return "bg-slate-400";
 }
 
 function cleanerStatus(cleaner: CleanerOption) {
@@ -213,6 +258,15 @@ function timeAgo(value: string) {
   });
 }
 
+function DetailMini({ label, value }: { label: string; value: any }) {
+  return (
+    <div>
+      <div className="text-[8px] font-extrabold uppercase text-slate-400">{label}</div>
+      <div className="mt-1 text-[10px] font-semibold capitalize text-slate-700">{String(value)}</div>
+    </div>
+  );
+}
+
 export default function BookingsManagement({
   bookings = [],
   cleaners = [],
@@ -238,19 +292,12 @@ export default function BookingsManagement({
   const counts = useMemo(() => {
     return {
       all: bookings.length,
-      pending: bookings.filter(
-        (booking) =>
-          normalizeStatus(booking.status) === "pending",
-      ).length,
-      assigned: bookings.filter((booking) =>
-        isAssigned(booking.status),
-      ).length,
-      completed: bookings.filter((booking) =>
-        isCompleted(booking.status),
-      ).length,
-      cancelled: bookings.filter((booking) =>
-        isCancelled(booking.status),
-      ).length,
+      new: bookings.filter((booking) => isNew(booking.status)).length,
+      review: bookings.filter((booking) => isReview(booking.status)).length,
+      quoteSent: bookings.filter((booking) => normalizeStatus(booking.status) === "quote_sent").length,
+      confirmed: bookings.filter((booking) => isConfirmed(booking.status)).length,
+      completed: bookings.filter((booking) => isCompleted(booking.status)).length,
+      cancelled: bookings.filter((booking) => isCancelled(booking.status)).length,
     };
   }, [bookings]);
 
@@ -272,6 +319,7 @@ export default function BookingsManagement({
         booking.service_type,
         booking.customer_name,
         booking.customer_phone,
+        booking.customer_email,
         booking.address,
         booking.cleaner_name,
         booking.id,
@@ -289,7 +337,7 @@ export default function BookingsManagement({
 
   const updateBooking = async (
     bookingId: string,
-    payload: Record<string, string | null>,
+    payload: Record<string, unknown>,
   ) => {
     setSaving(true);
     setError("");
@@ -313,6 +361,13 @@ export default function BookingsManagement({
         return false;
       }
 
+      if (result.booking) {
+        setSelectedBooking((current) =>
+          current && current.id === bookingId
+            ? { ...current, ...result.booking }
+            : current,
+        );
+      }
       router.refresh();
       return true;
     } catch {
@@ -406,7 +461,7 @@ export default function BookingsManagement({
                 selectedBooking.status,
               )}`}
             >
-              {selectedBooking.status || "Pending"}
+              {formatStatus(selectedBooking.status)}
             </span>
           </section>
 
@@ -603,8 +658,84 @@ export default function BookingsManagement({
                         </div>
                       )}
                     </div>
+                    <div>
+                      <div className="text-[8px] font-extrabold uppercase text-slate-400">
+                        Email
+                      </div>
+                      <div className="mt-1 break-all text-[10px] font-semibold text-slate-700">
+                        {selectedBooking.customer_email || "Not provided"}
+                      </div>
+                    </div>
                   </div>
                 </section>
+
+                {selectedBooking.service_data && (
+                  <section className={`rounded-lg border p-3.5 ${selectedBooking.service_data.adminReviewRequired ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white"}`}>
+                    <div className="flex items-center gap-2">
+                      {selectedBooking.service_data.adminReviewRequired ? (
+                        <AlertTriangle size={15} className="text-amber-600" />
+                      ) : (
+                        <Home size={15} className="text-[#4A86F7]" />
+                      )}
+                      <h3 className="font-bold text-[#13263A]">Property & Review</h3>
+                    </div>
+
+                    {selectedBooking.service_data.adminReviewRequired && (
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-white p-3">
+                        <div className="text-[9px] font-extrabold uppercase tracking-[0.06em] text-amber-700">Admin review required</div>
+                        <div className="mt-1 text-[10px] leading-5 text-amber-800">
+                          {Array.isArray(selectedBooking.service_data.adminReviewReasons) && selectedBooking.service_data.adminReviewReasons.length
+                            ? selectedBooking.service_data.adminReviewReasons.join(", ")
+                            : selectedBooking.service_data.customQuoteReason || "This booking requires manual review."}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <DetailMini label="Property type" value={String(selectedBooking.service_data.propertyType || "Not provided").replaceAll("_", " ")} />
+                      <DetailMini label="Condition" value={String(selectedBooking.service_data.propertyCondition || "Not provided").replaceAll("_", " ")} />
+                      <DetailMini label="Postal code" value={selectedBooking.service_data.postalCode || "Not provided"} />
+                      {selectedBooking.service_data.pricingPackageName && <DetailMini label="Pricing package" value={selectedBooking.service_data.pricingPackageName} />}
+                      {selectedBooking.service_data.movePropertyEmpty !== undefined && <DetailMini label="Property empty" value={selectedBooking.service_data.movePropertyEmpty ? "Yes" : "No"} />}
+                      {selectedBooking.service_data.calculatedTotal !== undefined && <DetailMini label="Calculated total" value={`CAD $${Number(selectedBooking.service_data.calculatedTotal || 0).toFixed(2)}`} />}
+                    </div>
+
+                    {selectedBooking.service_data.additionalInstructions && (
+                      <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="text-[8px] font-extrabold uppercase text-slate-400">Additional instructions</div>
+                        <div className="mt-1 whitespace-pre-wrap text-[10px] leading-5 text-slate-700">{selectedBooking.service_data.additionalInstructions}</div>
+                      </div>
+                    )}
+
+                    {Array.isArray(selectedBooking.service_data.conditionPhotoPaths) && selectedBooking.service_data.conditionPhotoPaths.length > 0 && (
+                      <div className="mt-3">
+                        <div className="mb-2 text-[8px] font-extrabold uppercase text-slate-400">Condition photos</div>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedBooking.service_data.conditionPhotoPaths.map((path: string, index: number) => (
+                            <a
+                              key={path}
+                              href={`/api/admin/bookings/condition-photo?path=${encodeURIComponent(path)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-[#0B4E9B] hover:border-blue-200 hover:bg-blue-50"
+                            >
+                              <FileImage size={13} /> Photo {index + 1}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
+
+                <BookingQuoteManager
+                  booking={selectedBooking}
+                  onUpdated={(updated) =>
+                    setSelectedBooking((current) =>
+                      current ? { ...current, ...updated } : current,
+                    )
+                  }
+                />
               </div>
 
               {/* ACTIONS / ASSIGNMENT */}
@@ -616,7 +747,7 @@ export default function BookingsManagement({
                     </h3>
 
                     <p className="mt-1 text-[10px] text-slate-500">
-                      Manage cleaner assignment and customer contact.
+                      Manage cleaner assignment and quick booking actions. Quote workflow is available in the main panel.
                     </p>
 
                     <div className="mt-4 space-y-2.5">
@@ -865,33 +996,15 @@ export default function BookingsManagement({
         </section>
 
         {/* SUMMARY */}
-        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
           {[
-            {
-              label: "Total",
-              value: counts.all,
-              tone: "text-[#13263A]",
-            },
-            {
-              label: "Pending",
-              value: counts.pending,
-              tone: "text-amber-600",
-            },
-            {
-              label: "Assigned",
-              value: counts.assigned,
-              tone: "text-blue-600",
-            },
-            {
-              label: "Completed",
-              value: counts.completed,
-              tone: "text-emerald-600",
-            },
-            {
-              label: "Cancelled",
-              value: counts.cancelled,
-              tone: "text-rose-600",
-            },
+            { label: "Total", value: counts.all, tone: "text-[#13263A]" },
+            { label: "New", value: counts.new, tone: "text-sky-600" },
+            { label: "Review", value: counts.review, tone: "text-amber-600" },
+            { label: "Quote Sent", value: counts.quoteSent, tone: "text-violet-600" },
+            { label: "Confirmed", value: counts.confirmed, tone: "text-blue-600" },
+            { label: "Completed", value: counts.completed, tone: "text-emerald-600" },
+            { label: "Cancelled", value: counts.cancelled, tone: "text-rose-600" },
           ].map((item) => (
             <div
               key={item.label}
@@ -1070,14 +1183,19 @@ export default function BookingsManagement({
                     {money(booking)}
                   </div>
 
-                  <div>
+                  <div className="flex flex-col items-start gap-1">
                     <span
                       className={`inline-flex rounded-md border px-2 py-1 text-[7px] font-extrabold uppercase tracking-[0.04em] ${statusTone(
                         booking.status,
                       )}`}
                     >
-                      {booking.status || "Pending"}
+                      {formatStatus(booking.status)}
                     </span>
+                    {booking.service_data?.adminReviewRequired && (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[7px] font-extrabold uppercase text-amber-700">
+                        <AlertTriangle size={9} /> Review
+                      </span>
+                    )}
                   </div>
 
                   <ChevronRight
@@ -1114,7 +1232,7 @@ export default function BookingsManagement({
                         booking.status,
                       )}`}
                     >
-                      {booking.status || "Pending"}
+                      {formatStatus(booking.status)}
                     </span>
                   </div>
 

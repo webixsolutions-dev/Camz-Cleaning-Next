@@ -23,7 +23,7 @@ export default async function AdminBookingsPage() {
   const [{ data: jobs }, { data: users }, { data: addresses }] = await Promise.all([
     supabase
       .from("jobs")
-      .select("id, customer_id, cleaner_id, service_name, service_type, date, address, price, final_price, total_price, status, created_at, payment_method, billing_type, booking_type")
+      .select("id, customer_id, cleaner_id, service_name, service_type, date, address, price, final_price, total_price, tax_rate, status, created_at, payment_method, billing_type, booking_type, service_data, guest_name, guest_email")
       .order("date", { ascending: true }) // ✅ Yahan change kiya hai: Booking Date ke hisaab se seedhi tarteeb
       .limit(200),
     supabase
@@ -42,12 +42,39 @@ export default async function AdminBookingsPage() {
   }
 
   const bookings: BookingRecord[] = (jobs || []).map((job) => {
-    const customer = job.customer_id ? usersById.get(job.customer_id) : null;
-    const cleaner = job.cleaner_id ? usersById.get(job.cleaner_id) : null;
+    // Keep this mapping explicit so the admin page remains compatible even when
+    // the generated Supabase TypeScript types lag behind newly added DB columns.
+    const row = job as Record<string, any>;
+    const customerId = row.customer_id ? String(row.customer_id) : null;
+    const cleanerId = row.cleaner_id ? String(row.cleaner_id) : null;
+    const customer = customerId ? usersById.get(customerId) : null;
+    const cleaner = cleanerId ? usersById.get(cleanerId) : null;
+    const serviceData = (row.service_data ?? null) as Record<string, any> | null;
+
     return {
-      ...job,
-      customer_name: customer?.name || "Guest customer",
-      customer_phone: customer?.phone_number || "",
+      id: String(row.id),
+      customer_id: customerId,
+      cleaner_id: cleanerId,
+      service_name: row.service_name ?? null,
+      service_type: row.service_type ?? null,
+      date: row.date ?? null,
+      address: row.address ?? null,
+      price: row.price ?? null,
+      final_price: row.final_price ?? null,
+      total_price: row.total_price ?? null,
+      tax_rate: row.tax_rate ?? null,
+      status: row.status ?? null,
+      created_at: row.created_at ? String(row.created_at) : "",
+      payment_method: row.payment_method ?? null,
+      billing_type: row.billing_type ?? null,
+      booking_type: row.booking_type ?? null,
+      service_data: serviceData,
+      customer_name:
+        customer?.name || row.guest_name || serviceData?.customerName || "Guest customer",
+      customer_email:
+        customer?.email || row.guest_email || serviceData?.customerEmail || "",
+      customer_phone:
+        customer?.phone_number || serviceData?.customerPhone || "",
       cleaner_name: cleaner?.name || "",
     };
   });

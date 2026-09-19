@@ -14,6 +14,12 @@ import {
   MapPin,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  ImagePlus,
+  Phone,
+  Home,
+  FileImage,
+  X,
 } from "lucide-react";
 import {
   LocalizationProvider,
@@ -26,6 +32,13 @@ import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import type { CleaningPricingConfig, PricingPackage } from "@/lib/pricing/config";
+import { calculateStandardCleaningPrice } from "@/lib/pricing/standard";
+import { calculateDeepCleaningPrice } from "@/lib/pricing/deep";
+import { calculateMoveInOutPrice } from "@/lib/pricing/moveInOut";
+import { calculateCarpetPrice, carpetAreaCount } from "@/lib/pricing/carpet";
+import { resolveCleaningPricingScope } from "@/lib/pricing/serviceScope";
+import { calculateServiceAddOns, getVisibleAddOns } from "@/lib/pricing/addOns";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -42,6 +55,7 @@ const SERVICE_AREAS = [
 type ServiceArea = (typeof SERVICE_AREAS)[number];
 
 const SERVICE_AREA_LABEL = "Calgary, Airdrie, Cochrane and Chestermere";
+const isValidPhone = (value: string) => value.replace(/\D/g, "").length >= 7;
 const CANADIAN_POSTAL_CODE_PATTERN =
   /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ][ -]?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i;
 
@@ -152,6 +166,13 @@ const validateNominatimResult = (
   const localityArea = getAreaFromText(localityText);
   const postalCode = normalizePostalCode(address.postcode);
   const postalArea = getAreaFromPostalCode(postalCode);
+
+  if (!CANADIAN_POSTAL_CODE_PATTERN.test(postalCode)) {
+    return {
+      valid: false,
+      message: "Please include a valid Canadian postal code with the service address.",
+    };
+  }
 
   if (!localityArea && !postalArea) {
     return {
@@ -312,12 +333,17 @@ const BookingModal = ({
   const [step, setStep] = useState(1);
   const [config, setConfig] = useState<ServiceConfig>({});
   const [loadingConfig, setLoadingConfig] = useState(false);
+  const [cleaningPricingConfig, setCleaningPricingConfig] =
+    useState<CleaningPricingConfig | null>(null);
+  const [pricingConfigError, setPricingConfigError] = useState<string | null>(null);
   
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [bookingId, setBookingId] = useState<string | null>(null);
+  const [submittedCustomQuote, setSubmittedCustomQuote] = useState(false);
+  const [submittedForReview, setSubmittedForReview] = useState(false);
   
   // Coordinates from geolocation
   const [coordinates, setCoordinates] = useState<{
@@ -344,8 +370,12 @@ const BookingModal = ({
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestEmailConfirm, setGuestEmailConfirm] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
+  const [conditionPhotos, setConditionPhotos] = useState<File[]>([]);
+  const [uploadedConditionPhotoPaths, setUploadedConditionPhotoPaths] = useState<string[]>([]);
 
   const totalSteps = 4;
+  const cleaningPricingScope = resolveCleaningPricingScope(service);
 
   const getCalgaryNow = () => dayjs().tz(CALGARY_TIME_ZONE);
 
@@ -420,6 +450,36 @@ const BookingModal = ({
   };
 
   const nextStep = async () => {
+    if (
+      step === 1 &&
+      cleaningPricingScope &&
+      (!cleaningPricingConfig || pricingConfigError)
+    ) {
+      alert(pricingConfigError || "Please wait for cleaning pricing to load.");
+      return;
+    }
+
+    if (
+      step === 1 &&
+      cleaningPricingScope === "carpet" &&
+      cleaningPricingConfig
+    ) {
+      const carpetSelection = {
+        standardRooms: formData.carpetStandardRooms,
+        largeRooms: formData.carpetLargeRooms,
+        hallways: formData.carpetHallways,
+        stairFlights: formData.carpetStairFlights,
+        smallAreaRugs: formData.carpetSmallAreaRugs,
+        heavyStainAreas: formData.carpetHeavyStainAreas,
+        petUrineOdor: formData.carpetPetUrineOdor,
+      };
+      const normalized = calculateCarpetPrice(cleaningPricingConfig, carpetSelection, "standalone").selection;
+      if (carpetAreaCount(normalized) === 0 && !normalized.petUrineOdor) {
+        alert("Please select at least one carpeted area or treatment.");
+        return;
+      }
+    }
+
     if (step === 1 && isGuest) {
       if (guestName.trim().length < 2) {
         alert("Please enter your name");
@@ -434,7 +494,48 @@ const BookingModal = ({
         alert("Emails do not match");
         return;
       }
+      if (!isValidPhone(guestPhone)) {
+        alert("Please enter a valid phone number");
+        return;
+      }
     }
+
+    if (step === 1 && cleaningPricingScope) {
+      if (!isGuest) {
+        if (String(formData.customerName || "").trim().length < 2) {
+          alert("Please enter the customer name.");
+          return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(formData.customerEmail || ""))) {
+          alert("Please enter a valid email address.");
+          return;
+        }
+        if (!isValidPhone(String(formData.customerPhone || ""))) {
+          alert("Please enter a valid phone number.");
+          return;
+        }
+      }
+      if (!formData.propertyType) {
+        alert("Please select the property type.");
+        return;
+      }
+      if (!formData.propertyCondition) {
+        alert("Please select the property condition.");
+        return;
+      }
+      if (
+        cleaningPricingScope === "move_in_out" &&
+        typeof formData.movePropertyEmpty !== "boolean"
+      ) {
+        alert("Please confirm whether the property will be empty.");
+        return;
+      }
+      if (requiresConditionPhotos() && conditionPhotos.length === 0) {
+        alert("Please add at least one condition photo for admin review.");
+        return;
+      }
+    }
+
     if (step === 2) {
       if (!date) {
         alert("Please select a date");
@@ -457,13 +558,60 @@ const BookingModal = ({
   };
 
   const isStepValid = () => {
+    const standardPricingReady =
+      !cleaningPricingScope ||
+      (!!cleaningPricingConfig && !pricingConfigError);
+
+    const carpetSelectionReady =
+      cleaningPricingScope !== "carpet" ||
+      !cleaningPricingConfig ||
+      (() => {
+        const normalized = calculateCarpetPrice(
+          cleaningPricingConfig,
+          {
+            standardRooms: formData.carpetStandardRooms,
+            largeRooms: formData.carpetLargeRooms,
+            hallways: formData.carpetHallways,
+            stairFlights: formData.carpetStairFlights,
+            smallAreaRugs: formData.carpetSmallAreaRugs,
+            heavyStainAreas: formData.carpetHeavyStainAreas,
+            petUrineOdor: formData.carpetPetUrineOdor,
+          },
+          "standalone",
+        ).selection;
+        return carpetAreaCount(normalized) > 0 || normalized.petUrineOdor;
+      })();
+
+    const authenticatedContactReady =
+      isGuest ||
+      !cleaningPricingScope ||
+      (String(formData.customerName || "").trim().length >= 2 &&
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(formData.customerEmail || "")) &&
+        isValidPhone(String(formData.customerPhone || "")));
+
+    const cleaningDetailsReady =
+      !cleaningPricingScope ||
+      (authenticatedContactReady &&
+        Boolean(formData.propertyType) &&
+        Boolean(formData.propertyCondition) &&
+        (cleaningPricingScope !== "move_in_out" ||
+          typeof formData.movePropertyEmpty === "boolean") &&
+        (!requiresConditionPhotos() || conditionPhotos.length > 0));
+
     if (step === 1 && isGuest) {
       const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail);
       return (
         guestName.trim().length >= 2 &&
         emailValid &&
-        guestEmail === guestEmailConfirm
+        guestEmail === guestEmailConfirm &&
+        isValidPhone(guestPhone) &&
+        standardPricingReady &&
+        carpetSelectionReady &&
+        cleaningDetailsReady
       );
+    }
+    if (step === 1) {
+      return standardPricingReady && carpetSelectionReady && cleaningDetailsReady;
     }
     if (step === 2) {
       return (
@@ -477,6 +625,29 @@ const BookingModal = ({
   };
 
   const prevStep = () => setStep((prev) => Math.max(prev - 1, 1));
+
+  const uploadConditionPhotos = async () => {
+    if (conditionPhotos.length === 0) return uploadedConditionPhotoPaths;
+    if (uploadedConditionPhotoPaths.length === conditionPhotos.length) {
+      return uploadedConditionPhotoPaths;
+    }
+
+    const payload = new FormData();
+    conditionPhotos.forEach((file) => payload.append("photos", file));
+    const response = await fetch("/api/booking/condition-photos", {
+      method: "POST",
+      body: payload,
+    });
+    const result = (await response.json()) as {
+      paths?: string[];
+      error?: string;
+    };
+    if (!response.ok || !Array.isArray(result.paths)) {
+      throw new Error(result.error || "We could not upload the condition photos.");
+    }
+    setUploadedConditionPhotoPaths(result.paths);
+    return result.paths;
+  };
 
   const handleConfirm = async () => {
     if (!isGuest && !user) {
@@ -506,6 +677,8 @@ const BookingModal = ({
     setSubmitError(null);
 
     try {
+      const conditionPhotoPaths =
+        conditionPhotos.length > 0 ? await uploadConditionPhotos() : [];
       const response = await fetch("/api/booking/", {
         method: "POST",
         headers: {
@@ -516,6 +689,7 @@ const BookingModal = ({
           isGuest,
           guestName: isGuest ? guestName.trim() : undefined,
           guestEmail: isGuest ? guestEmail.trim() : undefined,
+          guestPhone: isGuest ? guestPhone.trim() : undefined,
           bookingDateTime: selectedDateTime.toISOString(),
           address: location.trim(),
           coordinates,
@@ -523,7 +697,17 @@ const BookingModal = ({
           postalCode: validatedPostalCode || undefined,
           pricingType,
           hours,
-          formData,
+          formData: {
+            ...formData,
+            postalCode: validatedPostalCode || undefined,
+            serviceArea: validatedServiceArea || undefined,
+            conditionPhotoPaths,
+            customerName: isGuest
+              ? guestName.trim()
+              : formData.customerName || user?.user_metadata?.name || user?.user_metadata?.full_name || "",
+            customerEmail: isGuest ? guestEmail.trim() : formData.customerEmail || user?.email || "",
+            customerPhone: isGuest ? guestPhone.trim() : formData.customerPhone || "",
+          },
         }),
       });
 
@@ -531,6 +715,9 @@ const BookingModal = ({
         ok?: boolean;
         error?: string;
         bookingId?: string;
+        customQuoteRequired?: boolean;
+        adminReviewRequired?: boolean;
+        status?: string;
       };
 
       if (!response.ok || !result.ok) {
@@ -540,6 +727,8 @@ const BookingModal = ({
       }
 
       setBookingId(result.bookingId || null);
+      setSubmittedCustomQuote(Boolean(result.customQuoteRequired));
+      setSubmittedForReview(Boolean(result.adminReviewRequired));
       setSubmitSuccess(true);
     } catch (err) {
       console.error("Booking submission failed:", err);
@@ -557,62 +746,297 @@ const BookingModal = ({
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
-  const calculatePricing = () => {
-    if (!service) return { lineItems: [], subtotal: 0, tax: 0, total: 0 };
+  const applyStandardPackage = (pkg: PricingPackage) => {
+    setPricingType("Fixed");
+    setFormData((prev) => ({
+      ...prev,
+      standardPackageId: pkg.id,
+      bedrooms: Math.max(1, pkg.allowances.bedrooms),
+      fullBathrooms: Math.max(1, pkg.allowances.fullBathrooms),
+      halfBathrooms: 0,
+      kitchens: Math.max(1, pkg.allowances.kitchens),
+      livingRooms: Math.max(1, pkg.allowances.livingRooms),
+      finishedBasement: 0,
+      stairFlights: 0,
+      unusualLayout: false,
+    }));
+  };
+
+  const getCleaningAreaSelection = () => ({
+    bedrooms: formData.bedrooms,
+    fullBathrooms: formData.fullBathrooms,
+    halfBathrooms: formData.halfBathrooms,
+    kitchens: formData.kitchens,
+    livingRooms: formData.livingRooms,
+    finishedBasement: formData.finishedBasement,
+    stairFlights: formData.stairFlights,
+    unusualLayout: formData.unusualLayout,
+  });
+
+  const getStandardPricingResult = () => {
+    if (!cleaningPricingConfig || cleaningPricingScope !== "standard") {
+      return null;
+    }
+
+    return calculateStandardCleaningPrice(cleaningPricingConfig, {
+      ...getCleaningAreaSelection(),
+      preferredPackageId: formData.standardPackageId,
+    });
+  };
+
+  const getDeepPricingResult = () => {
+    if (!cleaningPricingConfig || cleaningPricingScope !== "deep") {
+      return null;
+    }
+    return calculateDeepCleaningPrice(
+      cleaningPricingConfig,
+      getCleaningAreaSelection(),
+    );
+  };
+
+  const getMoveInOutPricingResult = () => {
+    if (!cleaningPricingConfig || cleaningPricingScope !== "move_in_out") {
+      return null;
+    }
+    return calculateMoveInOutPrice(
+      cleaningPricingConfig,
+      getCleaningAreaSelection(),
+    );
+  };
+
+  const getCarpetPricingInput = () => ({
+    standardRooms: formData.carpetStandardRooms,
+    largeRooms: formData.carpetLargeRooms,
+    hallways: formData.carpetHallways,
+    stairFlights: formData.carpetStairFlights,
+    smallAreaRugs: formData.carpetSmallAreaRugs,
+    heavyStainAreas: formData.carpetHeavyStainAreas,
+    petUrineOdor: formData.carpetPetUrineOdor,
+  });
+
+  const getStandaloneCarpetPricingResult = () => {
+    if (!cleaningPricingConfig || cleaningPricingScope !== "carpet") {
+      return null;
+    }
+    return calculateCarpetPrice(
+      cleaningPricingConfig,
+      getCarpetPricingInput(),
+      "standalone",
+    );
+  };
+
+  const getCarpetAddonPricingResult = () => {
+    if (
+      !cleaningPricingConfig ||
+      !formData.carpetEnabled ||
+      !cleaningPricingScope ||
+      cleaningPricingScope === "carpet"
+    ) {
+      return null;
+    }
+    return calculateCarpetPrice(
+      cleaningPricingConfig,
+      getCarpetPricingInput(),
+      "addon",
+    );
+  };
+
+  const getAddOnPricingResult = () => {
+    if (!cleaningPricingConfig || !cleaningPricingScope) return null;
+    return calculateServiceAddOns(
+      cleaningPricingConfig,
+      cleaningPricingScope,
+      (formData.selectedAddOns || {}) as Record<string, number | boolean>,
+    );
+  };
+
+  const getPropertyReviewState = () => {
+    if (!cleaningPricingConfig || !cleaningPricingScope) {
+      return { reviewRequired: false, customQuote: false, reasons: [] as string[] };
+    }
+
+    const reasons: string[] = [];
+    let customQuote = false;
+
+    if (
+      formData.propertyCondition === "heavy" &&
+      cleaningPricingConfig.heavyCondition.enabled
+    ) {
+      reasons.push("Heavy property condition");
+      customQuote =
+        cleaningPricingConfig.heavyCondition.requiresAdminApproval ||
+        !cleaningPricingConfig.heavyCondition.allowInstantBooking;
+    }
+
+    if (
+      cleaningPricingScope === "move_in_out" &&
+      formData.movePropertyEmpty === false
+    ) {
+      reasons.push("Move-In / Move-Out property is not empty");
+      customQuote = true;
+    }
+
+    if (formData.unusualLayout === true) {
+      reasons.push("Unusual property layout");
+    }
+
+    return {
+      reviewRequired: reasons.length > 0,
+      customQuote,
+      reasons,
+    };
+  };
+
+  const requiresConditionPhotos = () => {
+    if (!cleaningPricingConfig || !cleaningPricingScope) return false;
+    const heavy = formData.propertyCondition === "heavy";
+    const addOnReview = Boolean(getAddOnPricingResult()?.adminReviewRequired);
+    return (
+      cleaningPricingConfig.heavyCondition.allowPhotoUpload &&
+      (heavy || addOnReview)
+    );
+  };
+
+  const calculatePricing = (): {
+    lineItems: { label: string; amount: number }[];
+    subtotal: number;
+    tax: number;
+    total: number;
+    taxRate: number;
+    taxLabel: string;
+    customQuote: boolean;
+    customQuoteReason: string | null;
+    estimatedTotal: number;
+    adminReviewRequired: boolean;
+  } => {
+    if (!service) {
+      return {
+        lineItems: [] as { label: string; amount: number }[],
+        subtotal: 0,
+        tax: 0,
+        total: 0,
+        taxRate: 0,
+        taxLabel: "Tax",
+        customQuote: false,
+        customQuoteReason: null as string | null,
+        estimatedTotal: 0,
+        adminReviewRequired: false,
+      };
+    }
+
+    if (cleaningPricingScope && cleaningPricingConfig) {
+      const baseResult =
+        cleaningPricingScope === "standard"
+          ? getStandardPricingResult()
+          : cleaningPricingScope === "deep"
+            ? getDeepPricingResult()
+            : cleaningPricingScope === "move_in_out"
+              ? getMoveInOutPricingResult()
+              : getStandaloneCarpetPricingResult();
+
+      if (!baseResult) {
+        return {
+          lineItems: [] as { label: string; amount: number }[],
+          subtotal: 0,
+          tax: 0,
+          total: 0,
+          taxRate: 0,
+          taxLabel: "Tax",
+          customQuote: false,
+          customQuoteReason: pricingConfigError || "Cleaning pricing is loading.",
+          estimatedTotal: 0,
+          adminReviewRequired: false,
+        };
+      }
+
+      const baseLineItems = baseResult.lineItems.map((item) => ({
+        label:
+          item.quantity > 1
+            ? `${item.label} (${item.quantity} × $${(item.unitPriceCents / 100).toFixed(2)})`
+            : item.label,
+        amount: item.amountCents / 100,
+      }));
+
+      const carpetAddon = getCarpetAddonPricingResult();
+      const carpetLineItems = carpetAddon
+        ? carpetAddon.lineItems
+            .filter((item) => item.amountCents > 0)
+            .map((item) => ({
+              label:
+                item.quantity > 1
+                  ? `Carpet: ${item.label} (${item.quantity} × $${(item.unitPriceCents / 100).toFixed(2)})`
+                  : `Carpet: ${item.label}`,
+              amount: item.amountCents / 100,
+            }))
+        : [];
+
+      const addOns = getAddOnPricingResult();
+      const addOnLineItems = addOns
+        ? addOns.lineItems.map((item) => ({
+            label:
+              item.quantity > 1
+                ? `${item.label} (${item.quantity} × $${(item.unitPriceCents / 100).toFixed(2)})`
+                : item.label,
+            amount: item.amountCents / 100,
+          }))
+        : [];
+      const propertyReview = getPropertyReviewState();
+
+      const subtotalCents =
+        baseResult.subtotalCents +
+        (carpetAddon?.subtotalCents || 0) +
+        (addOns?.subtotalCents || 0);
+      const taxRate = cleaningPricingConfig.tax.enabled
+        ? cleaningPricingConfig.tax.rate
+        : 0;
+      const taxCents = Math.round(subtotalCents * taxRate);
+      const customQuote =
+        baseResult.customQuote ||
+        Boolean(carpetAddon?.customQuote) ||
+        Boolean(addOns?.customQuote) ||
+        propertyReview.customQuote;
+      const customQuoteReason =
+        baseResult.customQuoteReason ||
+        carpetAddon?.customQuoteReason ||
+        addOns?.customQuoteReason ||
+        propertyReview.reasons[0] ||
+        null;
+
+      return {
+        lineItems: [...baseLineItems, ...addOnLineItems, ...carpetLineItems],
+        subtotal: subtotalCents / 100,
+        tax: taxCents / 100,
+        total: customQuote ? 0 : (subtotalCents + taxCents) / 100,
+        taxRate,
+        taxLabel: cleaningPricingConfig.tax.label,
+        customQuote,
+        customQuoteReason,
+        estimatedTotal: (subtotalCents + taxCents) / 100,
+        adminReviewRequired:
+          propertyReview.reviewRequired ||
+          Boolean(addOns?.adminReviewRequired),
+      };
+    }
+
+    if (cleaningPricingScope && !cleaningPricingConfig) {
+      return {
+        lineItems: [] as { label: string; amount: number }[],
+        subtotal: 0,
+        tax: 0,
+        total: 0,
+        taxRate: 0,
+        taxLabel: "Tax",
+        customQuote: false,
+        customQuoteReason: pricingConfigError || "Cleaning pricing is loading.",
+        estimatedTotal: 0,
+        adminReviewRequired: false,
+      };
+    }
 
     const lineItems: { label: string; amount: number }[] = [];
     let subtotal = 0;
 
     switch (service.service_type) {
-      case "residential":
-      case "move_in_out": {
-        const baseRate = config.base_rate || 0;
-        const bedroomRate = config.bedroom_rate || 0;
-        const washroomRate = config.washroom_rate || 0;
-        const beds = Number(formData.bedrooms) || 0;
-        const washes = Number(formData.washrooms) || 0;
-
-        if (baseRate > 0) {
-          lineItems.push({ label: "Base Service", amount: baseRate });
-          subtotal += baseRate;
-        }
-
-        if (beds > 0 && bedroomRate > 0) {
-          const amt = beds * bedroomRate;
-          lineItems.push({
-            label: `Bedrooms (${beds} × $${bedroomRate})`,
-            amount: amt,
-          });
-          subtotal += amt;
-        }
-
-        if (washes > 0 && washroomRate > 0) {
-          const amt = washes * washroomRate;
-          lineItems.push({
-            label: `Washrooms (${washes} × $${washroomRate})`,
-            amount: amt,
-          });
-          subtotal += amt;
-        }
-
-        if (formData.furnished && config.furnished_fee) {
-          lineItems.push({
-            label: "Furnished surcharge",
-            amount: config.furnished_fee,
-          });
-          subtotal += config.furnished_fee;
-        }
-
-        if (formData.heavy_condition && config.heavy_condition_fee) {
-          lineItems.push({
-            label: "Heavy condition fee",
-            amount: config.heavy_condition_fee,
-          });
-          subtotal += config.heavy_condition_fee;
-        }
-        break;
-      }
-
       case "vehicle": {
         const rates =
           (config.rates as Record<string, Record<string, number>>) || {};
@@ -685,22 +1109,96 @@ const BookingModal = ({
     const tax = subtotal * taxRate;
     const total = subtotal + tax;
 
-    return { lineItems, subtotal, tax, total, taxRate };
+    return {
+      lineItems,
+      subtotal,
+      tax,
+      total,
+      taxRate,
+      taxLabel: "Tax",
+      customQuote: false,
+      customQuoteReason: null as string | null,
+      estimatedTotal: total,
+      adminReviewRequired: false,
+    };
   };
 
-  const initializeFormData = (serviceType: string, cfg: ServiceConfig) => {
+  const initialCleaningFields = () => ({
+    customerName: isGuest ? "" : user?.user_metadata?.name || user?.user_metadata?.full_name || "",
+    customerEmail: isGuest ? "" : user?.email || "",
+    customerPhone: isGuest ? "" : user?.user_metadata?.phone || user?.user_metadata?.phone_number || "",
+    bedrooms: 1,
+    fullBathrooms: 1,
+    halfBathrooms: 0,
+    kitchens: 1,
+    livingRooms: 1,
+    finishedBasement: 0,
+    stairFlights: 0,
+    unusualLayout: false,
+    propertyType: "house",
+    propertyCondition: "regular",
+    movePropertyEmpty: null,
+    additionalInstructions: "",
+    selectedAddOns: {},
+    carpetEnabled: false,
+    carpetStandardRooms: 0,
+    carpetLargeRooms: 0,
+    carpetHallways: 0,
+    carpetStairFlights: 0,
+    carpetSmallAreaRugs: 0,
+    carpetHeavyStainAreas: 0,
+    carpetPetUrineOdor: false,
+    carpetCondition: "regular",
+  });
+
+  const initializeFormData = (
+    serviceType: string,
+    cfg: ServiceConfig,
+    serviceTitle = "",
+  ) => {
+    const scope = resolveCleaningPricingScope({
+      service_type: serviceType,
+      title: serviceTitle,
+    });
+
+    if (scope === "standard") {
+      setPricingType("Fixed");
+      setFormData({
+        ...initialCleaningFields(),
+        standardPackageId: "essential_standard",
+      });
+      return;
+    }
+
+    if (scope === "deep" || scope === "move_in_out") {
+      setPricingType("Fixed");
+      setFormData(initialCleaningFields());
+      return;
+    }
+
+    if (scope === "carpet") {
+      setPricingType("Fixed");
+      setFormData({
+        customerName: isGuest ? "" : user?.user_metadata?.name || user?.user_metadata?.full_name || "",
+        customerEmail: isGuest ? "" : user?.email || "",
+        customerPhone: isGuest ? "" : user?.user_metadata?.phone || user?.user_metadata?.phone_number || "",
+        propertyType: "house",
+        propertyCondition: "regular",
+        additionalInstructions: "",
+        selectedAddOns: {},
+        carpetStandardRooms: 1,
+        carpetLargeRooms: 0,
+        carpetHallways: 0,
+        carpetStairFlights: 0,
+        carpetSmallAreaRugs: 0,
+        carpetHeavyStainAreas: 0,
+        carpetPetUrineOdor: false,
+        carpetCondition: "regular",
+      });
+      return;
+    }
+
     switch (serviceType) {
-      case "residential":
-        setFormData({ bedrooms: 1, washrooms: 1 });
-        break;
-      case "move_in_out":
-        setFormData({
-          bedrooms: 1,
-          washrooms: 1,
-          furnished: false,
-          heavy_condition: false,
-        });
-        break;
       case "vehicle": {
         const firstVehicle = cfg.rates ? Object.keys(cfg.rates)[0] : "";
         const firstPackage =
@@ -738,17 +1236,62 @@ const BookingModal = ({
           .maybeSingle();
         const cfg: ServiceConfig = data?.config_json || {};
         setConfig(cfg);
-        initializeFormData(service.service_type, cfg);
+        initializeFormData(service.service_type, cfg, service.title);
       } catch (err) {
         console.error("Error fetching service config:", err);
         setConfig({});
-        initializeFormData(service.service_type, {});
+        initializeFormData(service.service_type, {}, service.title);
       } finally {
         setLoadingConfig(false);
       }
     };
     fetchConfig();
   }, [isOpen, service?.id]);
+
+  // Phase 3: all supported cleaning scopes use the same central, admin-editable pricing config.
+  useEffect(() => {
+    if (!isOpen || !cleaningPricingScope) {
+      setCleaningPricingConfig(null);
+      setPricingConfigError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadPricing = async () => {
+      setPricingConfigError(null);
+      try {
+        const response = await fetch("/api/pricing", { cache: "no-store" });
+        const payload = (await response.json()) as {
+          config?: CleaningPricingConfig;
+          error?: string;
+        };
+
+        if (!response.ok || !payload.config) {
+          throw new Error(payload.error || "Cleaning pricing is temporarily unavailable.");
+        }
+
+        if (!cancelled) {
+          setCleaningPricingConfig(payload.config);
+        }
+      } catch (error) {
+        console.error("Unable to load cleaning pricing:", error);
+        if (!cancelled) {
+          setCleaningPricingConfig(null);
+          setPricingConfigError(
+            error instanceof Error
+              ? error.message
+              : "Cleaning pricing is temporarily unavailable.",
+          );
+        }
+      }
+    };
+
+    void loadPricing();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, cleaningPricingScope]);
 
   // Reset on close
   useEffect(() => {
@@ -764,10 +1307,14 @@ const BookingModal = ({
       setSubmitSuccess(false);
       setSubmitError(null);
       setBookingId(null);
+      setSubmittedCustomQuote(false);
       setCoordinates(null);
       setGuestName("");
       setGuestEmail("");
       setGuestEmailConfirm("");
+      setGuestPhone("");
+      setConditionPhotos([]);
+      setUploadedConditionPhotoPaths([]);
       setLoadingLocation(false);
       setIsValidatingAddress(false);
       setLocationStatus("idle");
@@ -775,6 +1322,8 @@ const BookingModal = ({
       setValidatedLocation("");
       setValidatedServiceArea(null);
       setValidatedPostalCode("");
+      setCleaningPricingConfig(null);
+      setPricingConfigError(null);
     }
   }, [isOpen]);
 
@@ -874,154 +1423,562 @@ const BookingModal = ({
   };
 
   // --- Dynamic Step 1 Fields ---
+  const cleaningSelectClass =
+    "h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70";
+
+  const renderCleaningPropertyFields = () => (
+    <div className="mb-5 space-y-5">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex items-start gap-3">
+          <Home size={18} className="mt-0.5 shrink-0 text-blue-600" />
+          <div>
+            <p className="text-sm font-black text-slate-800">Property Information</p>
+            <p className="mt-1 text-[11px] leading-5 text-slate-400">
+              Tell us about the property so the correct package, included areas and additional charges can be applied.
+            </p>
+          </div>
+        </div>
+
+        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Property Type</label>
+            <select
+              value={formData.propertyType || "house"}
+              onChange={(e) => updateField("propertyType", e.target.value)}
+              className={cleaningSelectClass}
+            >
+              <option value="house">House</option>
+              <option value="apartment">Apartment</option>
+              <option value="condo">Condo</option>
+              <option value="townhouse">Townhouse</option>
+              <option value="basement_suite">Basement suite</option>
+              <option value="rental_property">Rental property</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Property Condition</label>
+            <select
+              value={formData.propertyCondition || "regular"}
+              onChange={(e) => {
+                updateField("propertyCondition", e.target.value);
+                if (e.target.value !== "heavy") {
+                  setUploadedConditionPhotoPaths([]);
+                }
+              }}
+              className={cleaningSelectClass}
+            >
+              <option value="regular">Regularly maintained</option>
+              <option value="moderate">Moderate buildup</option>
+              <option value="heavy">Heavy condition</option>
+            </select>
+          </div>
+        </div>
+
+        {cleaningPricingScope === "move_in_out" && (
+          <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+            <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-emerald-700">
+              Will the property be empty at the time of service?
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {[true, false].map((value) => (
+                <button
+                  type="button"
+                  key={String(value)}
+                  onClick={() => updateField("movePropertyEmpty", value)}
+                  className={`rounded-xl border px-3 py-2.5 text-xs font-black transition ${
+                    formData.movePropertyEmpty === value
+                      ? "border-emerald-600 bg-emerald-600 text-white"
+                      : "border-emerald-200 bg-white text-emerald-700"
+                  }`}
+                >
+                  {value ? "Yes, empty" : "No, occupied"}
+                </button>
+              ))}
+            </div>
+            {formData.movePropertyEmpty === false && (
+              <p className="mt-2 text-[11px] leading-5 text-amber-700">
+                Move-In / Move-Out base pricing assumes an empty property. An occupied property will be sent for admin review.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="mb-4">
+          <p className="text-sm font-black text-slate-800">Property Size</p>
+          <p className="mt-1 text-[11px] leading-5 text-slate-400">
+            The calculator applies the correct base tier first, then charges only for areas beyond that tier.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Bedrooms</label>
+            <select value={formData.bedrooms ?? 1} onChange={(e) => updateField("bedrooms", Number(e.target.value))} className={cleaningSelectClass}>
+              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} Bedroom{n > 1 ? "s" : ""}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Full Bathrooms</label>
+            <select value={formData.fullBathrooms ?? 1} onChange={(e) => updateField("fullBathrooms", Number(e.target.value))} className={cleaningSelectClass}>
+              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} Full Bathroom{n > 1 ? "s" : ""}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Half Bathrooms</label>
+            <select value={formData.halfBathrooms ?? 0} onChange={(e) => updateField("halfBathrooms", Number(e.target.value))} className={cleaningSelectClass}>
+              {[0, 1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Kitchens</label>
+            <select value={formData.kitchens ?? 1} onChange={(e) => updateField("kitchens", Number(e.target.value))} className={cleaningSelectClass}>
+              {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Living / Family Rooms</label>
+            <select value={formData.livingRooms ?? 1} onChange={(e) => updateField("livingRooms", Number(e.target.value))} className={cleaningSelectClass}>
+              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Finished Basement Living Area</label>
+            <select value={formData.finishedBasement ?? 0} onChange={(e) => updateField("finishedBasement", Number(e.target.value))} className={cleaningSelectClass}>
+              <option value={0}>No</option>
+              <option value={1}>Yes</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Flights of Stairs</label>
+            <select value={formData.stairFlights ?? 0} onChange={(e) => updateField("stairFlights", Number(e.target.value))} className={cleaningSelectClass}>
+              {[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-end">
+            <label className="flex min-h-[46px] w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-600">
+              <input type="checkbox" checked={formData.unusualLayout === true} onChange={(e) => updateField("unusualLayout", e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+              Unusual property layout
+            </label>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-1.5">
+          <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Additional Instructions</label>
+          <textarea
+            value={formData.additionalInstructions || ""}
+            onChange={(e) => updateField("additionalInstructions", e.target.value.slice(0, 1500))}
+            rows={3}
+            placeholder="Access details, areas needing extra attention, pets or other service notes..."
+            className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+          />
+        </div>
+      </div>
+
+      {(formData.propertyCondition === "heavy" || requiresConditionPhotos()) && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <p className="text-sm font-black text-amber-900">Admin review required</p>
+              <p className="mt-1 text-xs leading-5 text-amber-700">
+                Heavy or condition-dependent work is reviewed before the final price is confirmed. Add clear photos so the team can assess the scope accurately.
+              </p>
+
+              {cleaningPricingConfig?.heavyCondition.allowPhotoUpload && (
+                <div className="mt-4">
+                  <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-amber-300 bg-white px-4 py-3 text-xs font-black text-amber-800 transition hover:bg-amber-50">
+                    <ImagePlus size={17} />
+                    Add condition photos
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        const incoming = Array.from(event.target.files || []) as File[];
+                        const valid = incoming.filter((file) =>
+                          ["image/jpeg", "image/png", "image/webp"].includes(file.type) &&
+                          file.size <= 8 * 1024 * 1024,
+                        );
+                        if (incoming.length !== valid.length) {
+                          alert("Only JPG, PNG or WEBP images up to 8 MB each are allowed.");
+                        }
+                        const next = valid.slice(0, 6);
+                        setConditionPhotos(next);
+                        setUploadedConditionPhotoPaths([]);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <p className="mt-2 text-[10px] text-amber-700">Up to 6 photos, maximum 8 MB each.</p>
+                  {conditionPhotos.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {conditionPhotos.map((file, index) => (
+                        <div key={`${file.name}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <FileImage size={15} className="shrink-0 text-amber-600" />
+                            <span className="truncate text-[11px] font-bold text-slate-600">{file.name}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConditionPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index));
+                              setUploadedConditionPhotoPaths([]);
+                            }}
+                            className="shrink-0 text-[10px] font-black uppercase text-red-500"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderAddOnsConfigurator = () => {
+    if (!cleaningPricingConfig || !cleaningPricingScope) return null;
+    const visibleAddOns = getVisibleAddOns(cleaningPricingConfig, cleaningPricingScope);
+    if (visibleAddOns.length === 0) return null;
+
+    const selected = (formData.selectedAddOns || {}) as Record<string, number | boolean>;
+    const setAddOn = (id: string, value: number | boolean) => {
+      updateField("selectedAddOns", { ...selected, [id]: value });
+      setUploadedConditionPhotoPaths([]);
+    };
+
+    return (
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="mb-4">
+          <p className="text-sm font-black text-slate-800">Optional Add-Ons</p>
+          <p className="mt-1 text-[11px] leading-5 text-slate-400">
+            Only add-ons relevant to this service are shown. Anything already included in the selected service is automatically hidden so it cannot be charged twice.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {visibleAddOns.map((addOn) => {
+            const perUnit = addOn.priceType === "per_unit";
+            const quantity = perUnit ? Number(selected[addOn.id] || 0) : selected[addOn.id] ? 1 : 0;
+            const priceLabel =
+              addOn.priceType === "custom_quote"
+                ? "Custom quote"
+                : `${addOn.priceType === "from" ? "From " : ""}$${((addOn.priceCents || 0) / 100).toFixed(2)}${perUnit && addOn.unit ? ` / ${addOn.unit}` : ""}`;
+
+            return (
+              <div key={addOn.id} className={`rounded-xl border p-3 transition ${quantity > 0 ? "border-blue-200 bg-blue-50/50" : "border-slate-200 bg-slate-50"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black text-slate-800">{addOn.name}</p>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-500">{addOn.note}</p>
+                    {addOn.adminReview && (
+                      <p className="mt-1 text-[10px] font-black uppercase tracking-wider text-amber-600">Admin review</p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-xs font-black text-blue-700">{priceLabel}</span>
+                </div>
+
+                {perUnit ? (
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <span className="text-[10px] font-bold uppercase text-slate-400">Quantity</span>
+                    <select
+                      value={quantity}
+                      onChange={(e) => setAddOn(addOn.id, Number(e.target.value))}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-blue-100"
+                    >
+                      {Array.from({ length: 21 }, (_, index) => (
+                        <option key={index} value={index}>{index}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={quantity > 0}
+                      onChange={(e) => setAddOn(addOn.id, e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                    />
+                    Add to this service
+                  </label>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderCarpetConfigurator = (standalone: boolean) => {
+    if (!cleaningPricingConfig?.carpet.enabled) return null;
+
+    const result = standalone
+      ? getStandaloneCarpetPricingResult()
+      : getCarpetAddonPricingResult();
+
+    if (!standalone && !formData.carpetEnabled) {
+      return (
+        <button
+          type="button"
+          onClick={() => updateField("carpetEnabled", true)}
+          className="mb-5 flex w-full items-center justify-between rounded-2xl border border-blue-200 bg-blue-50 p-4 text-left transition hover:border-blue-300"
+        >
+          <div>
+            <p className="text-sm font-black text-blue-800">Add Carpet Steam Cleaning</p>
+            <p className="mt-1 text-[11px] text-blue-600">Add carpeted rooms, hallways, stairs, rugs or stain treatment to this booking.</p>
+          </div>
+          <Plus size={18} className="shrink-0 text-blue-700" />
+        </button>
+      );
+    }
+
+    return (
+      <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-black text-slate-800">Carpet Steam Cleaning{standalone ? "" : " Add-On"}</p>
+            <p className="mt-1 text-[11px] leading-5 text-slate-500">
+              {standalone
+                ? `Standalone carpet cleaning has a $${(cleaningPricingConfig.carpet.standaloneMinimumCents / 100).toFixed(0)} minimum.`
+                : "Carpet add-on pricing is added to the selected cleaning service."}
+            </p>
+          </div>
+          {!standalone && (
+            <button type="button" onClick={() => updateField("carpetEnabled", false)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-black uppercase text-slate-500">Remove</button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {[
+            ["carpetStandardRooms", "Standard Carpeted Rooms", 10],
+            ["carpetLargeRooms", "Living / Larger Rooms", 6],
+            ["carpetHallways", "Hallways", 6],
+            ["carpetStairFlights", "Carpeted Stair Flights", 6],
+            ["carpetSmallAreaRugs", "Small Area Rugs", 8],
+            ["carpetHeavyStainAreas", "Heavy Stain Areas", 10],
+          ].map(([key, label, max]) => (
+            <div className="space-y-1.5" key={String(key)}>
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">{String(label)}</label>
+              <select value={formData[String(key)] ?? 0} onChange={(e) => updateField(String(key), Number(e.target.value))} className={cleaningSelectClass}>
+                {Array.from({ length: Number(max) + 1 }, (_, n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          ))}
+
+          <div className="space-y-1.5">
+            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Approximate Carpet Condition</label>
+            <select value={formData.carpetCondition || "regular"} onChange={(e) => updateField("carpetCondition", e.target.value)} className={cleaningSelectClass}>
+              <option value="regular">Regular</option>
+              <option value="moderate">Moderate buildup</option>
+              <option value="heavy">Heavy</option>
+            </select>
+          </div>
+
+          <div className="flex items-end">
+            <label className="flex min-h-[46px] w-full cursor-pointer items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 text-xs font-bold text-amber-800">
+              <input type="checkbox" checked={formData.carpetPetUrineOdor === true} onChange={(e) => updateField("carpetPetUrineOdor", e.target.checked)} className="h-4 w-4 rounded border-amber-300" />
+              Pet urine / odour treatment
+            </label>
+          </div>
+        </div>
+
+        {result && (
+          <div className={`mt-4 rounded-xl border p-3 ${result.customQuote ? "border-amber-200 bg-amber-50" : "border-blue-100 bg-white"}`}>
+            {result.customQuote ? (
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-xs font-black text-amber-800">Custom quote required</p>
+                  <p className="mt-1 text-[11px] text-amber-700">{result.customQuoteReason}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Carpet subtotal</span>
+                <span className="text-base font-black text-blue-700">${(result.subtotalCents / 100).toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderCleaningEstimate = (
+    label: string,
+    result:
+      | ReturnType<typeof getStandardPricingResult>
+      | ReturnType<typeof getDeepPricingResult>
+      | ReturnType<typeof getMoveInOutPricingResult>,
+  ) => {
+    if (!result) return null;
+    const combined = calculatePricing();
+    return (
+      <div className={`rounded-2xl border p-4 ${combined.customQuote ? "border-amber-200 bg-amber-50" : "border-blue-100 bg-blue-50"}`}>
+        {combined.customQuote ? (
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <div>
+              <p className="text-sm font-black text-amber-800">Custom quote required</p>
+              <p className="mt-1 text-xs leading-5 text-amber-700">{combined.customQuoteReason}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-wider text-blue-600">{label}</p>
+              <p className="mt-1 text-xs text-slate-500">Applied tier: {result.packageName}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xl font-black text-blue-700">${combined.total.toFixed(2)}</p>
+              <p className="text-[10px] font-bold text-slate-400">incl. {combined.taxLabel}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderServiceFields = () => {
     if (!service) return null;
-    switch (service.service_type) {
-      case "residential":
-      case "move_in_out":
+
+    if (cleaningPricingScope) {
+      if (pricingConfigError) {
+        return (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+            <p className="text-sm font-black text-red-700">Cleaning pricing is unavailable</p>
+            <p className="mt-1 text-xs leading-5 text-red-600">{pricingConfigError}</p>
+          </div>
+        );
+      }
+
+      if (!cleaningPricingConfig) {
+        return (
+          <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">
+            <Loader2 size={16} className="animate-spin" />
+            Loading cleaning pricing…
+          </div>
+        );
+      }
+
+      if (cleaningPricingScope === "standard") {
+        const standard = cleaningPricingConfig.services.standard;
+        const selectablePackages = standard.packages.filter((pkg) => pkg.customerSelectable);
+        const livePricing = getStandardPricingResult();
+
         return (
           <>
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                  Bedrooms
-                </label>
-                <select
-                  value={formData.bedrooms ?? 1}
-                  onChange={(e) =>
-                    updateField("bedrooms", Number(e.target.value))
-                  }
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                >
-                  {[1, 2, 3, 4, 5, 6].map((n) => (
-                    <option key={n} value={n}>
-                      {n} Bedroom{n > 1 ? "s" : ""}
-                    </option>
-                  ))}
-                </select>
+            <div className="mb-6">
+              <div className="mb-3">
+                <label className="ml-1 text-[11px] font-black uppercase tracking-wider text-slate-500">Choose a starting package</label>
+                <p className="ml-1 mt-1 text-[11px] text-slate-400">Your price updates automatically as you change the property size.</p>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                  Washrooms
-                </label>
-                <select
-                  value={formData.washrooms ?? 1}
-                  onChange={(e) =>
-                    updateField("washrooms", Number(e.target.value))
-                  }
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n} Washroom{n > 1 ? "s" : ""}
-                    </option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {selectablePackages.map((pkg) => {
+                  const selected = formData.standardPackageId === pkg.id;
+                  const popular = pkg.id === "complete_standard";
+                  return (
+                    <button type="button" key={pkg.id} onClick={() => applyStandardPackage(pkg)} className={`relative rounded-2xl border-2 p-4 text-left transition-all ${selected ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300"}`}>
+                      {popular && <span className="absolute -top-2.5 right-3 rounded-full bg-blue-600 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-white">Most Popular</span>}
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-slate-800">{pkg.name}</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">{pkg.description}</p>
+                        </div>
+                        <p className="shrink-0 text-lg font-black text-blue-600">${(pkg.basePriceCents / 100).toFixed(0)}</p>
+                      </div>
+                      {selected && <div className="mt-3 flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-blue-700"><CheckCircle2 size={13} /> Selected</div>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-
-            {config.furnished_fee !== undefined && (
-              <div className="mb-6 space-y-2">
-                <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                  Property Status
-                </label>
-                <div className="flex gap-2">
-                  {[
-                    { key: false, label: "Empty" },
-                    {
-                      key: true,
-                      label: `Furnished (+$${config.furnished_fee})`,
-                    },
-                  ].map((opt) => (
-                    <button
-                      key={String(opt.key)}
-                      onClick={() => updateField("furnished", opt.key)}
-                      className={`flex-1 py-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${formData.furnished === opt.key ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}
-                    >
-                      {formData.furnished === opt.key && <Check size={14} />}{" "}
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {config.heavy_condition_fee !== undefined && (
-              <div className="mb-4 space-y-2">
-                <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                  Property Condition
-                </label>
-                <div className="flex gap-2">
-                  {[
-                    { key: false, label: "Normal" },
-                    {
-                      key: true,
-                      label: `Heavy (+$${config.heavy_condition_fee})`,
-                    },
-                  ].map((opt) => (
-                    <button
-                      key={String(opt.key)}
-                      onClick={() => updateField("heavy_condition", opt.key)}
-                      className={`flex-1 py-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${formData.heavy_condition === opt.key ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}
-                    >
-                      {formData.heavy_condition === opt.key && (
-                        <Check size={14} />
-                      )}{" "}
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {renderCleaningPropertyFields()}
+            {renderAddOnsConfigurator()}
+            {renderCarpetConfigurator(false)}
+            {renderCleaningEstimate("Live Standard Cleaning Estimate", livePricing)}
           </>
         );
+      }
 
+      if (cleaningPricingScope === "deep") {
+        const livePricing = getDeepPricingResult();
+        return (
+          <>
+            <div className="mb-5 rounded-2xl border border-purple-100 bg-purple-50 p-4">
+              <p className="text-sm font-black text-purple-900">Deep Cleaning — From ${(cleaningPricingConfig.services.deep.startingPriceCents / 100).toFixed(0)}</p>
+              <p className="mt-1 text-xs leading-5 text-purple-700">Dedicated Deep Cleaning tiers and room increments are used. The price is not calculated as a universal Standard + upgrade fee.</p>
+            </div>
+            {renderCleaningPropertyFields()}
+            {renderAddOnsConfigurator()}
+            {renderCarpetConfigurator(false)}
+            {renderCleaningEstimate("Live Deep Cleaning Estimate", livePricing)}
+          </>
+        );
+      }
+
+      if (cleaningPricingScope === "move_in_out") {
+        const livePricing = getMoveInOutPricingResult();
+        return (
+          <>
+            <div className="mb-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+              <p className="text-sm font-black text-emerald-900">Move-In / Move-Out — From ${(cleaningPricingConfig.services.move_in_out.startingPriceCents / 100).toFixed(0)}</p>
+              <p className="mt-1 text-xs leading-5 text-emerald-700">The closest documented base tier is applied first. Properties with 5+ bedrooms require a custom quote.</p>
+            </div>
+            {renderCleaningPropertyFields()}
+            {renderAddOnsConfigurator()}
+            {renderCarpetConfigurator(false)}
+            {renderCleaningEstimate("Live Move-In / Move-Out Estimate", livePricing)}
+          </>
+        );
+      }
+
+      return (
+        <>
+          {renderCleaningPropertyFields()}
+          {renderCarpetConfigurator(true)}
+          {renderAddOnsConfigurator()}
+        </>
+      );
+    }
+
+    switch (service.service_type) {
       case "vehicle": {
         const vehicleTypes = config.rates ? Object.keys(config.rates) : [];
         const selectedVehicle = formData.vehicle_type || vehicleTypes[0] || "";
-        const packages =
-          selectedVehicle && config.rates?.[selectedVehicle]
-            ? Object.keys(config.rates[selectedVehicle])
-            : [];
+        const packages = selectedVehicle && config.rates?.[selectedVehicle] ? Object.keys(config.rates[selectedVehicle]) : [];
         return (
           <>
             <div className="mb-6 space-y-2">
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                Vehicle Type
-              </label>
+              <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Vehicle Type</label>
               <div className="grid grid-cols-3 gap-2">
                 {vehicleTypes.map((vt) => (
-                  <button
-                    key={vt}
-                    onClick={() => {
-                      updateField("vehicle_type", vt);
-                      const firstPkg = config.rates?.[vt]
-                        ? Object.keys(config.rates[vt])[0]
-                        : "";
-                      updateField("package", firstPkg);
-                    }}
-                    className={`py-2.5 rounded-xl border text-[11px] font-bold transition-all capitalize ${formData.vehicle_type === vt ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}
-                  >
-                    {vt}
-                  </button>
+                  <button type="button" key={vt} onClick={() => { updateField("vehicle_type", vt); const firstPkg = config.rates?.[vt] ? Object.keys(config.rates[vt])[0] : ""; updateField("package", firstPkg); }} className={`rounded-xl border py-2.5 text-[11px] font-bold capitalize transition-all ${formData.vehicle_type === vt ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-100" : "border-slate-200 bg-white text-slate-500 hover:border-blue-300"}`}>{vt}</button>
                 ))}
               </div>
             </div>
             <div className="mb-4 space-y-2">
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                Package
-              </label>
+              <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Package</label>
               <div className="grid grid-cols-3 gap-2">
                 {packages.map((pkg) => (
-                  <button
-                    key={pkg}
-                    onClick={() => updateField("package", pkg)}
-                    className={`py-2.5 rounded-xl border text-[11px] font-bold transition-all capitalize ${formData.package === pkg ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}
-                  >
-                    <div>{pkg}</div>
-                    <div className="text-[10px] mt-0.5 opacity-80">
-                      ${config.rates?.[selectedVehicle]?.[pkg]}
-                    </div>
+                  <button type="button" key={pkg} onClick={() => updateField("package", pkg)} className={`rounded-xl border py-2.5 text-[11px] font-bold capitalize transition-all ${formData.package === pkg ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-100" : "border-slate-200 bg-white text-slate-500 hover:border-blue-300"}`}>
+                    <div>{pkg}</div><div className="mt-0.5 text-[10px] opacity-80">${config.rates?.[selectedVehicle]?.[pkg]}</div>
                   </button>
                 ))}
               </div>
@@ -1036,75 +1993,23 @@ const BookingModal = ({
         return (
           <>
             <div className="mb-6 space-y-2">
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                Item Type
-              </label>
+              <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Item Type</label>
               <div className="grid grid-cols-2 gap-2">
                 {itemTypes.map((item) => (
-                  <button
-                    key={item}
-                    onClick={() => updateField("item_type", item)}
-                    className={`py-2.5 rounded-xl border text-[11px] font-bold transition-all capitalize ${formData.item_type === item ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}
-                  >
-                    <div>{item}</div>
-                    <div className="text-[10px] mt-0.5 opacity-80">
-                      ${config.rates?.[item]}
-                    </div>
+                  <button type="button" key={item} onClick={() => updateField("item_type", item)} className={`rounded-xl border py-2.5 text-[11px] font-bold capitalize transition-all ${formData.item_type === item ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-100" : "border-slate-200 bg-white text-slate-500 hover:border-blue-300"}`}>
+                    <div>{item}</div><div className="mt-0.5 text-[10px] opacity-80">${config.rates?.[item]}</div>
                   </button>
                 ))}
               </div>
             </div>
             <div className="mb-6 space-y-2">
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                Quantity
-              </label>
+              <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Quantity</label>
               <div className="flex items-center justify-center gap-6">
-                <button
-                  onClick={() =>
-                    updateField(
-                      "quantity",
-                      Math.max(1, (formData.quantity || 1) - 1),
-                    )
-                  }
-                  className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-white hover:text-blue-600 transition-all"
-                >
-                  <Minus size={14} />
-                </button>
-                <div className="text-2xl font-black text-slate-800 w-12 text-center">
-                  {formData.quantity || 1}
-                </div>
-                <button
-                  onClick={() =>
-                    updateField("quantity", (formData.quantity || 1) + 1)
-                  }
-                  className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-white hover:text-blue-600 transition-all"
-                >
-                  <Plus size={14} />
-                </button>
+                <button type="button" onClick={() => updateField("quantity", Math.max(1, (formData.quantity || 1) - 1))} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-all hover:bg-white hover:text-blue-600"><Minus size={14} /></button>
+                <div className="w-12 text-center text-2xl font-black text-slate-800">{formData.quantity || 1}</div>
+                <button type="button" onClick={() => updateField("quantity", (formData.quantity || 1) + 1)} className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-all hover:bg-white hover:text-blue-600"><Plus size={14} /></button>
               </div>
             </div>
-            {config.heavy_multiplier !== undefined && (
-              <div className="mb-4 space-y-2">
-                <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                  Condition
-                </label>
-                <div className="flex gap-2">
-                  {[
-                    { key: false, label: "Light" },
-                    { key: true, label: `Heavy (×${config.heavy_multiplier})` },
-                  ].map((opt) => (
-                    <button
-                      key={String(opt.key)}
-                      onClick={() => updateField("heavy", opt.key)}
-                      className={`flex-1 py-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${formData.heavy === opt.key ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}
-                    >
-                      {formData.heavy === opt.key && <Check size={14} />}{" "}
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </>
         );
       }
@@ -1113,45 +2018,21 @@ const BookingModal = ({
         return (
           <>
             <div className="mb-6 space-y-2">
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                Business Type
-              </label>
+              <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Business Type</label>
               <div className="grid grid-cols-3 gap-2">
-                {["office", "retail", "clinic"].map((bt) => (
-                  <button
-                    key={bt}
-                    onClick={() => updateField("sub_type", bt)}
-                    className={`py-2.5 rounded-xl border text-[11px] font-bold transition-all capitalize ${formData.sub_type === bt ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-100" : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"}`}
-                  >
-                    {bt}
-                  </button>
-                ))}
+                {["office", "retail", "clinic"].map((bt) => <button type="button" key={bt} onClick={() => updateField("sub_type", bt)} className={`rounded-xl border py-2.5 text-[11px] font-bold capitalize transition-all ${formData.sub_type === bt ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-100" : "border-slate-200 bg-white text-slate-500 hover:border-blue-300"}`}>{bt}</button>)}
               </div>
             </div>
             <div className="mb-4 space-y-2">
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                Area (sq ft)
-              </label>
-              <input
-                type="number"
-                min={100}
-                value={formData.area ?? 1000}
-                onChange={(e) => updateField("area", Number(e.target.value))}
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-              />
-              <p className="text-[10px] text-slate-400 ml-1">
-                We&apos;ll discuss exact pricing based on requirements
-              </p>
+              <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Area (sq ft)</label>
+              <input type="number" min={100} value={formData.area ?? 1000} onChange={(e) => updateField("area", Number(e.target.value))} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold outline-none transition-all focus:ring-2 focus:ring-blue-500" />
+              <p className="ml-1 text-[10px] text-slate-400">We&apos;ll discuss exact pricing based on requirements</p>
             </div>
           </>
         );
 
       default:
-        return (
-          <div className="text-center py-8 text-slate-400 text-sm">
-            Service configuration not available. Please contact support.
-          </div>
-        );
+        return <div className="py-8 text-center text-sm text-slate-400">Service configuration not available. Please contact support.</div>;
     }
   };
 
@@ -1176,11 +2057,14 @@ const BookingModal = ({
           </motion.div>
 
           <h2 className="text-2xl font-black text-slate-800 mb-2">
-            Booking Confirmed!
+            {submittedCustomQuote || submittedForReview
+              ? "Request Submitted!"
+              : "Booking Request Received!"}
           </h2>
           <p className="text-sm text-slate-500 mb-6">
-            Your booking has been received. Our team will assign a cleaner and
-            contact you shortly.
+            {submittedCustomQuote || submittedForReview
+              ? "Your request has been received for admin review. We will confirm the final scope and price before the booking is finalized."
+              : "Your booking request has been received. Our team will confirm it and assign a cleaner shortly."}
           </p>
 
           {bookingId && (
@@ -1232,25 +2116,44 @@ const BookingModal = ({
       <motion.div
         initial={{ opacity: 0, y: 20, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl overflow-hidden relative border border-slate-100 max-h-[90vh] overflow-y-auto"
+        className="relative flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-2xl"
       >
         {/* Header Section */}
-        <div className="px-8 pt-8">
-          <div className="flex gap-2 mb-6">
-            {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${i <= step ? "bg-blue-600" : "bg-slate-100"}`}
-              />
-            ))}
-          </div>
-          <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-widest text-slate-400">
-            <span>Step {step} of 4</span>
-            <span className="text-blue-600">{service.title}</span>
+        <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-4 pt-5 sm:px-6 sm:pt-6">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting || isValidatingAddress}
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40 sm:right-5 sm:top-5"
+            aria-label="Close booking form"
+          >
+            <X size={17} />
+          </button>
+          <div className="pr-12">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600">Booking details</p>
+                <p className="mt-1 text-sm font-black text-slate-900 sm:text-base">{service.title}</p>
+              </div>
+              <span className="rounded-full bg-blue-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-blue-700">Step {step} of 4</span>
+            </div>
+            <div className="mt-4 flex gap-2">
+              {[1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${i <= step ? "bg-blue-600" : "bg-slate-100"}`}
+                />
+              ))}
+            </div>
+            <div className="mt-2 hidden grid-cols-4 gap-2 text-center text-[9px] font-bold uppercase tracking-wider text-slate-400 sm:grid">
+              {["Customize", "Schedule", "Location", "Review"].map((label, index) => (
+                <span key={label} className={index + 1 === step ? "text-blue-600" : ""}>{label}</span>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="p-8">
+        <div className="flex-1 overflow-y-auto bg-slate-50/60 p-4 sm:p-6">
           <AnimatePresence mode="wait">
             {step === 1 && (
               <motion.div
@@ -1259,11 +2162,20 @@ const BookingModal = ({
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
               >
-                <h2 className="text-2xl font-black text-slate-800 mb-6">
-                  {service.title} Details
-                </h2>
+                <div className="mb-5">
+                  <h2 className="text-2xl font-black text-slate-900">Customize your service</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">Choose the property details and options that match this booking.</p>
+                </div>
+                {cleaningPricingScope && (
+                  <div className="mb-5 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                    <p className="text-xs leading-5 text-slate-700">
+                      <span className="font-black text-slate-900">Package pricing:</span> your selected service has an included plan. Extra rooms and optional add-ons are charged separately only when selected, and the live estimate updates automatically.
+                    </p>
+                  </div>
+                )}
                 {isGuest && (
-                  <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-2xl space-y-4">
+                  <div className="mb-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <p className="text-[11px] font-black uppercase text-blue-600 tracking-widest">
                       Your Contact Info
                     </p>
@@ -1276,7 +2188,7 @@ const BookingModal = ({
                         value={guestName}
                         onChange={(e) => setGuestName(e.target.value)}
                         placeholder="John Doe"
-                        className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1288,7 +2200,7 @@ const BookingModal = ({
                         value={guestEmail}
                         onChange={(e) => setGuestEmail(e.target.value)}
                         placeholder="you@example.com"
-                        className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1300,7 +2212,7 @@ const BookingModal = ({
                         value={guestEmailConfirm}
                         onChange={(e) => setGuestEmailConfirm(e.target.value)}
                         placeholder="you@example.com"
-                        className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                       />
                       {guestEmailConfirm.length > 0 &&
                         guestEmail !== guestEmailConfirm && (
@@ -1308,6 +2220,60 @@ const BookingModal = ({
                             Emails do not match
                           </p>
                         )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
+                        Phone Number
+                      </label>
+                      <div className="relative">
+                        <Phone size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="tel"
+                          value={guestPhone}
+                          onChange={(e) => setGuestPhone(e.target.value)}
+                          placeholder="(403) 555-0123"
+                          className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!isGuest && cleaningPricingScope && (
+                  <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="mb-4 text-[11px] font-black uppercase tracking-widest text-blue-600">
+                      Customer Contact
+                    </p>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Full Name</label>
+                        <input
+                          type="text"
+                          value={formData.customerName || ""}
+                          onChange={(e) => updateField("customerName", e.target.value)}
+                          className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                          placeholder="Customer name"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Email</label>
+                        <input
+                          type="email"
+                          value={formData.customerEmail || ""}
+                          onChange={(e) => updateField("customerEmail", e.target.value)}
+                          className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                          placeholder="you@example.com"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Phone Number</label>
+                        <input
+                          type="tel"
+                          value={formData.customerPhone || ""}
+                          onChange={(e) => updateField("customerPhone", e.target.value)}
+                          className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
+                          placeholder="(403) 555-0123"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1503,56 +2469,76 @@ const BookingModal = ({
                   Pricing Plan
                 </h2>
                 <p className="text-[11px] font-bold text-slate-400 mb-6 uppercase tracking-wider">
-                  Select your preferred billing method
+                  {cleaningPricingScope
+                    ? "Transparent package-based pricing"
+                    : "Select your preferred billing method"}
                 </p>
 
-                <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div
-                    onClick={() => setPricingType("Fixed")}
-                    className={`p-5 rounded-2xl border-2 cursor-pointer transition-all text-center ${pricingType === "Fixed" ? "border-blue-600 bg-blue-50/30" : "border-slate-100 bg-slate-50 text-slate-400"}`}
-                  >
-                    <ClipboardList
-                      className={`mx-auto mb-2 ${pricingType === "Fixed" ? "text-blue-600" : "text-slate-300"}`}
-                      size={20}
-                    />
-                    <div className="text-xs font-black">Fixed Price</div>
-                  </div>
-                  <div
-                    onClick={() => setPricingType("Hourly")}
-                    className={`p-5 rounded-2xl border-2 cursor-pointer transition-all text-center ${pricingType === "Hourly" ? "border-blue-600 bg-blue-600 text-white shadow-xl shadow-blue-100" : "border-slate-100 bg-slate-50 text-slate-400"}`}
-                  >
-                    <Clock
-                      className={`mx-auto mb-2 ${pricingType === "Hourly" ? "text-white" : "text-slate-300"}`}
-                      size={20}
-                    />
-                    <div className="text-xs font-black">Hourly Price</div>
-                  </div>
-                </div>
-
-                {pricingType === "Hourly" && (
-                  <div className="text-center mb-8 bg-slate-50 py-6 rounded-2xl">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Estimated Duration
-                    </span>
-                    <div className="flex items-center justify-center gap-6 mt-4">
-                      <button
-                        onClick={() => setHours((h) => Math.max(1, h - 1))}
-                        className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-white hover:text-blue-600 transition-all"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <div className="text-2xl font-black text-slate-800 w-12">
-                        {hours}
-                        <span className="text-[10px] ml-1">hrs</span>
-                      </div>
-                      <button
-                        onClick={() => setHours((h) => h + 1)}
-                        className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-white hover:text-blue-600 transition-all"
-                      >
-                        <Plus size={14} />
-                      </button>
+                {cleaningPricingScope ? (
+                  <div className="mb-8 flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                    <ClipboardList className="h-5 w-5 shrink-0 text-blue-600" />
+                    <div>
+                      <p className="text-xs font-black text-slate-800">
+                        Fixed cleaning price
+                      </p>
+                      <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                        The central pricing rules apply the correct service tier, additional areas and carpet charges automatically.
+                      </p>
                     </div>
                   </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-4 mb-8">
+                      <div
+                        onClick={() => setPricingType("Fixed")}
+                        className={`p-5 rounded-2xl border-2 cursor-pointer transition-all text-center ${pricingType === "Fixed" ? "border-blue-600 bg-blue-50/30" : "border-slate-100 bg-slate-50 text-slate-400"}`}
+                      >
+                        <ClipboardList
+                          className={`mx-auto mb-2 ${pricingType === "Fixed" ? "text-blue-600" : "text-slate-300"}`}
+                          size={20}
+                        />
+                        <div className="text-xs font-black">Fixed Price</div>
+                      </div>
+                      <div
+                        onClick={() => setPricingType("Hourly")}
+                        className={`p-5 rounded-2xl border-2 cursor-pointer transition-all text-center ${pricingType === "Hourly" ? "border-blue-600 bg-blue-600 text-white shadow-xl shadow-blue-100" : "border-slate-100 bg-slate-50 text-slate-400"}`}
+                      >
+                        <Clock
+                          className={`mx-auto mb-2 ${pricingType === "Hourly" ? "text-white" : "text-slate-300"}`}
+                          size={20}
+                        />
+                        <div className="text-xs font-black">Hourly Price</div>
+                      </div>
+                    </div>
+
+                    {pricingType === "Hourly" && (
+                      <div className="text-center mb-8 bg-slate-50 py-6 rounded-2xl">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          Estimated Duration
+                        </span>
+                        <div className="flex items-center justify-center gap-6 mt-4">
+                          <button
+                            type="button"
+                            onClick={() => setHours((h) => Math.max(1, h - 1))}
+                            className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-white hover:text-blue-600 transition-all"
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <div className="text-2xl font-black text-slate-800 w-12">
+                            {hours}
+                            <span className="text-[10px] ml-1">hrs</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setHours((h) => h + 1)}
+                            className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-white hover:text-blue-600 transition-all"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {(() => {
@@ -1562,10 +2548,28 @@ const BookingModal = ({
                     tax,
                     total,
                     taxRate = 0,
+                    taxLabel = "Tax",
+                    customQuote,
+                    customQuoteReason,
                   } = calculatePricing();
                   return (
                     <div className="space-y-3 px-2">
-                      {lineItems.length === 0 ? (
+                      {customQuote ? (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                            <div>
+                              <p className="text-sm font-black text-amber-800">
+                                Custom quote required
+                              </p>
+                              <p className="mt-1 text-xs leading-5 text-amber-700">
+                                {customQuoteReason ||
+                                  "Camz Cleaning will review this property before confirming the final price."}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : lineItems.length === 0 ? (
                         <div className="text-center py-4">
                           <p className="text-sm font-bold text-slate-400">
                             Pricing will be confirmed after consultation
@@ -1592,7 +2596,9 @@ const BookingModal = ({
                           </div>
                           {taxRate > 0 && (
                             <div className="flex justify-between text-[11px] font-bold text-slate-400">
-                              <span>Tax ({(taxRate * 100).toFixed(0)}%)</span>
+                              <span>
+                                {taxLabel} ({(taxRate * 100).toFixed(0)}%)
+                              </span>
                               <span className="text-slate-800">
                                 ${tax.toFixed(2)}
                               </span>
@@ -1624,7 +2630,7 @@ const BookingModal = ({
                   Review Your Booking
                 </h2>
                 <p className="text-[11px] font-bold text-slate-400 mb-6 uppercase tracking-wider">
-                  Please verify details before confirming
+                  Review every section before submitting
                 </p>
 
                 {submitError && (
@@ -1640,136 +2646,273 @@ const BookingModal = ({
                 )}
 
                 <div className="space-y-3">
-                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-                    <p className="text-[10px] font-black uppercase text-blue-600 tracking-widest mb-1">
-                      Service
-                    </p>
-                    <p className="text-base font-black text-slate-800">
-                      {service.title}
-                    </p>
-                  </div>
-
-                  <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-                    <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                      Schedule
-                    </p>
-
-                    <div className="flex items-center gap-3">
-                      <Calendar size={16} className="text-blue-600 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-[10px] text-slate-400 uppercase font-bold">
-                          Date
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] font-black uppercase text-blue-600 tracking-widest mb-1">
+                          Selected Service
                         </p>
-                        <p className="text-sm font-bold text-slate-800">
-                          {date ? date.format("MMM DD, YYYY") : "Not set"}
+                        <p className="text-base font-black text-slate-800">
+                          {service.title}
                         </p>
+                        {cleaningPricingScope !== "carpet" && (() => {
+                          const applied = getStandardPricingResult() || getDeepPricingResult() || getMoveInOutPricingResult();
+                          return applied ? (
+                            <p className="mt-1 text-xs font-semibold text-slate-500">
+                              {applied.packageName}
+                            </p>
+                          ) : null;
+                        })()}
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <Clock size={16} className="text-blue-600 shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-[10px] text-slate-400 uppercase font-bold">
-                          Time
-                        </p>
-                        <p className="text-sm font-bold text-slate-800">
-                          {time ? time.format("hh:mm A") : "Not set"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                      <MapPin
-                        size={16}
-                        className="text-blue-600 shrink-0 mt-0.5"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[10px] text-slate-400 uppercase font-bold">
-                          Location
-                        </p>
-                        <p className="text-sm font-bold text-slate-800 break-words">
-                          {location || "Not set"}
-                        </p>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setStep(1)}
+                        className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-[10px] font-black text-blue-700 hover:bg-blue-100"
+                      >
+                        Edit
+                      </button>
                     </div>
                   </div>
 
-                  {Object.keys(formData).length > 0 && (
-                    <div className="bg-slate-50 rounded-2xl p-4">
-                      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3">
-                        Service Details
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                        Customer & Property
                       </p>
-                      <div className="space-y-2">
-                        {Object.entries(formData).map(([key, value]) => (
-                          <div
-                            key={key}
-                            className="flex justify-between items-center"
-                          >
-                            <span className="text-xs text-slate-500 capitalize">
-                              {key.replace(/_/g, " ")}
-                            </span>
-                            <span className="text-sm font-bold text-slate-800 capitalize">
-                              {typeof value === "boolean"
-                                ? value
-                                  ? "Yes"
-                                  : "No"
-                                : String(value)}
-                            </span>
-                          </div>
-                        ))}
+                      <button
+                        type="button"
+                        onClick={() => setStep(1)}
+                        className="rounded-lg border border-blue-100 bg-white px-2.5 py-1.5 text-[10px] font-black text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Customer</p>
+                        <p className="mt-1 text-sm font-bold text-slate-800">
+                          {isGuest ? guestName : formData.customerName || user?.user_metadata?.name || user?.user_metadata?.full_name || "Not provided"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Property Type</p>
+                        <p className="mt-1 text-sm font-bold capitalize text-slate-800">
+                          {String(formData.propertyType || "Not provided").replaceAll("_", " ")}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Condition</p>
+                        <p className="mt-1 text-sm font-bold capitalize text-slate-800">
+                          {String(formData.propertyCondition || "Not provided").replaceAll("_", " ")}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Property Size</p>
+                        <p className="mt-1 text-sm font-bold text-slate-800">
+                          {cleaningPricingScope === "carpet"
+                            ? `${getStandaloneCarpetPricingResult() ? carpetAreaCount(getStandaloneCarpetPricingResult()!.selection) : 0} carpet area(s)`
+                            : cleaningPricingScope
+                              ? `${Number(formData.bedrooms || 0)} bed, ${Number(formData.fullBathrooms || 0)} full bath${Number(formData.halfBathrooms || 0) ? `, ${Number(formData.halfBathrooms || 0)} half bath` : ""}`
+                              : "See service details below"}
+                        </p>
                       </div>
                     </div>
-                  )}
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                        Schedule & Address
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setStep(2)}
+                        className="rounded-lg border border-blue-100 bg-white px-2.5 py-1.5 text-[10px] font-black text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <Calendar size={16} className="text-blue-600 shrink-0" />
+                        <p className="text-sm font-bold text-slate-800">
+                          {date ? date.format("MMM DD, YYYY") : "Not set"} · {time ? time.format("hh:mm A") : "Not set"}
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <MapPin size={16} className="mt-0.5 shrink-0 text-blue-600" />
+                        <div>
+                          <p className="text-sm font-bold text-slate-800 break-words">{location || "Not set"}</p>
+                          {validatedPostalCode && (
+                            <p className="mt-1 text-[11px] font-semibold text-slate-500">Postal code: {validatedPostalCode}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                        Service Customization
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setStep(1)}
+                        className="rounded-lg border border-blue-100 bg-white px-2.5 py-1.5 text-[10px] font-black text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+                      >
+                        Edit
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {cleaningPricingScope && cleaningPricingScope !== "carpet" && [
+                        ["Bedrooms", formData.bedrooms],
+                        ["Full bathrooms", formData.fullBathrooms],
+                        ["Half bathrooms", formData.halfBathrooms],
+                        ["Kitchens", formData.kitchens],
+                        ["Living / family rooms", formData.livingRooms],
+                        ["Finished basement", formData.finishedBasement],
+                        ["Stair flights", formData.stairFlights],
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
+                          <span className="block text-[10px] font-bold uppercase leading-4 tracking-wide text-slate-400">{label}</span>
+                          <span className="mt-1 block text-lg font-black leading-none text-slate-800">{Number(value || 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {!cleaningPricingScope && (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {Object.entries(formData)
+                          .filter(([key]) => !["customerName", "customerEmail", "customerPhone", "additionalInstructions"].includes(key))
+                          .map(([key, value]) => (
+                            <div key={key} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
+                              <span className="block text-[10px] font-bold uppercase leading-4 tracking-wide text-slate-400">{key.replaceAll("_", " ")}</span>
+                              <span className="mt-1 block break-words text-sm font-black capitalize text-slate-800">
+                                {typeof value === "boolean" ? (value ? "Yes" : "No") : String(value ?? "")}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+
+                    {getAddOnPricingResult()?.lineItems.length ? (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="mb-2 text-[10px] font-black uppercase text-slate-400">Selected add-ons</p>
+                        <div className="space-y-1.5">
+                          {getAddOnPricingResult()?.lineItems.map((item) => (
+                            <div key={`summary-addon-${item.id}`} className="flex justify-between gap-3 text-xs">
+                              <span className="text-slate-600">{item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ""}</span>
+                              <span className="font-black text-slate-800">${(item.amountCents / 100).toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {getCarpetAddonPricingResult()?.lineItems.some((item) => item.amountCents > 0) && (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="mb-2 text-[10px] font-black uppercase text-slate-400">Carpet services</p>
+                        <div className="space-y-1.5">
+                          {getCarpetAddonPricingResult()?.lineItems.filter((item) => item.amountCents > 0).map((item) => (
+                            <div key={`summary-carpet-${item.key}`} className="flex justify-between gap-3 text-xs">
+                              <span className="text-slate-600">{item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ""}</span>
+                              <span className="font-black text-slate-800">${(item.amountCents / 100).toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {formData.additionalInstructions && (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-[10px] font-black uppercase text-slate-400">Additional instructions</p>
+                        <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-600">{formData.additionalInstructions}</p>
+                      </div>
+                    )}
+                    {conditionPhotos.length > 0 && (
+                      <p className="mt-3 text-[11px] font-bold text-amber-700">{conditionPhotos.length} condition photo(s) attached for review.</p>
+                    )}
+                  </div>
 
                   {(() => {
-                    const { total } = calculatePricing();
+                    const pricing = calculatePricing();
                     return (
-                      <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
-                        <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3">
-                          Pricing
-                        </p>
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-slate-500">
-                            Billing Type
-                          </span>
-                          <span className="text-sm font-bold text-slate-800">
-                            {pricingType}
-                          </span>
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Price Summary</p>
+                          <button
+                            type="button"
+                            onClick={() => setStep(3)}
+                            className="rounded-lg border border-blue-100 bg-white px-2.5 py-1.5 text-[10px] font-black text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+                          >
+                            Edit
+                          </button>
                         </div>
-                        {pricingType === "Hourly" && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs text-slate-500">
-                              Estimated Hours
-                            </span>
-                            <span className="text-sm font-bold text-slate-800">
-                              {hours} hrs
-                            </span>
+
+                        <div className="space-y-2">
+                          {pricing.lineItems.map((item, index) => (
+                            <div key={`${item.label}-${index}`} className="flex justify-between gap-3 text-xs">
+                              <span className="text-slate-500">{item.label}</span>
+                              <span className="font-bold text-slate-800">${item.amount.toFixed(2)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between gap-3 border-t border-slate-100 pt-2 text-xs">
+                            <span className="font-bold text-slate-500">Subtotal</span>
+                            <span className="font-black text-slate-800">${pricing.subtotal.toFixed(2)}</span>
                           </div>
-                        )}
-                        {total > 0 && (
-                          <div className="flex justify-between items-center pt-3 border-t border-slate-200">
-                            <span className="text-xs font-black uppercase text-slate-700 tracking-wider">
-                              Total Amount
-                            </span>
-                            <span className="text-xl font-black text-blue-600">
-                              ${total.toFixed(2)}
-                            </span>
+                          <div className="flex justify-between gap-3 text-xs">
+                            <span className="font-bold text-slate-500">{pricing.taxLabel}{pricing.taxRate > 0 ? ` (${(pricing.taxRate * 100).toFixed(0)}%)` : ""}</span>
+                            <span className="font-black text-slate-800">${pricing.tax.toFixed(2)}</span>
                           </div>
-                        )}
+
+                          {pricing.customQuote || pricing.adminReviewRequired ? (
+                            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                              <p className="text-xs font-black text-amber-800">
+                                {pricing.customQuote ? "Custom quote required" : "Admin review required"}
+                              </p>
+                              <p className="mt-1 text-[11px] leading-5 text-amber-700">
+                                {pricing.customQuoteReason || "Our team will review the details before confirming the booking."}
+                              </p>
+                              {pricing.estimatedTotal !== undefined && pricing.estimatedTotal > 0 && (
+                                <div className="mt-2 flex justify-between border-t border-amber-200 pt-2 text-xs">
+                                  <span className="font-bold text-amber-700">Calculated estimate</span>
+                                  <span className="font-black text-amber-900">${pricing.estimatedTotal.toFixed(2)}</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                              <span className="text-sm font-black uppercase tracking-tight text-slate-800">Final Total</span>
+                              <span className="text-xl font-black text-blue-600">${pricing.total.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })()}
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Important service notes</p>
+                    <ul className="mt-2 space-y-1.5 text-[11px] leading-5 text-slate-600">
+                      <li>• Final price and scope are shown before confirmation whenever instant booking is available.</li>
+                      <li>• Heavy, unusual, or restoration-level work may require admin review or a custom quote.</li>
+                      <li>• If review is required, the booking is not treated as confirmed until Camz Cleaning approves it.</li>
+                      <li>• Changes or cancellation requests should be made as early as possible before the scheduled service time.</li>
+                    </ul>
+                  </div>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
 
           {/* Actions */}
-          <div className="flex gap-3 mt-10">
+          <div className="sticky bottom-0 z-20 -mx-4 -mb-4 mt-8 flex gap-3 border-t border-slate-200 bg-white/95 px-4 py-4 shadow-[0_-10px_28px_rgba(15,23,42,0.08)] backdrop-blur sm:-mx-6 sm:-mb-6 sm:px-6">
             <button
               onClick={step === 1 ? onClose : prevStep}
               disabled={isSubmitting || isValidatingAddress} // Update back button state too
-              className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 text-xs font-black hover:bg-slate-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-w-[92px] px-4 sm:px-6 py-3 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-black hover:bg-slate-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {step === 1 ? "Cancel" : "Back"}
             </button>
@@ -1798,7 +2941,9 @@ const BookingModal = ({
               ) : (
                 <>
                   {step === 4
-                    ? "Confirm Booking"
+                    ? (calculatePricing().customQuote || calculatePricing().adminReviewRequired
+                        ? "Submit Request"
+                        : "Submit Booking")
                     : step === 3
                       ? "Review"
                       : "Continue"}{" "}
