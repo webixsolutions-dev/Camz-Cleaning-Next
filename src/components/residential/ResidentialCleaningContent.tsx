@@ -735,7 +735,7 @@ const ResidentialCleaningContent = () => {
             <Link href="/booking/" className="rounded-lg bg-[#0B4E9B] px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-600 transition-colors">
               Online Booking
             </Link>
-            <Link href="/contact/" className="rounded-lg bg-white/10 px-5 py-2.5 text-sm font-bold text-white hover:bg-white/20 transition-colors border border-white/20">
+            <Link href="/contact-us/" className="rounded-lg bg-white/10 px-5 py-2.5 text-sm font-bold text-white hover:bg-white/20 transition-colors border border-white/20">
               Request a Quote
             </Link>
           </div>
@@ -855,7 +855,7 @@ const ResidentialCleaningContent = () => {
       </section>
 
       {/* SECTION 10: Frequently Asked Questions (Accordion + Rich Data) */}
-      <section className="space-y-6">
+      {/* <section className="space-y-6">
         <div className="space-y-2 border-b border-slate-200 pb-4">
           <h2 className="text-2xl font-extrabold text-[#0B4E9B] md:text-3xl">
             Frequently Asked Questions About Residential Cleaning in Calgary
@@ -900,7 +900,7 @@ const ResidentialCleaningContent = () => {
             );
           })}
         </div>
-      </section>
+      </section> */}
 
       {/* SECTION 11: Final Booking Call To Action Section */}
       <section className="rounded-3xl bg-gradient-to-r from-[#0B4E9B] to-[#125eb5] p-8 text-center text-white shadow-xl md:p-12">
@@ -921,7 +921,7 @@ const ResidentialCleaningContent = () => {
             Book Residential Cleaning
           </Link>
           <Link
-            href="/contact/"
+            href="/contact-us/"
             className="rounded-xl border border-white/30 bg-white/10 px-8 py-4 text-base font-bold text-white backdrop-blur-sm transition-all hover:bg-white/20"
           >
             Request a Quote
