@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
@@ -75,7 +74,6 @@ type ServiceCardDefinition = {
   icon: React.ReactNode;
   accentClass: string;
   iconClass: string;
-  image: string;
 };
 
 const money0 = (cents: number) => `$${Math.round(cents / 100)}`;
@@ -167,7 +165,6 @@ const BookingClient = ({ services }: BookingClientProps) => {
       icon: <Home className="h-7 w-7" />,
       accentClass: "border-blue-200 bg-blue-50/70",
       iconClass: "bg-blue-600 text-white",
-      image: "/wp-admin/uploads/cleaned kitchen.webp",
     },
     {
       scope: "deep",
@@ -185,7 +182,6 @@ const BookingClient = ({ services }: BookingClientProps) => {
       icon: <Sparkles className="h-7 w-7" />,
       accentClass: "border-violet-200 bg-violet-50/70",
       iconClass: "bg-violet-600 text-white",
-      image: "/wp-admin/uploads/Room cleaning.webp",
     },
     {
       scope: "move_in_out",
@@ -203,7 +199,6 @@ const BookingClient = ({ services }: BookingClientProps) => {
       icon: <Building2 className="h-7 w-7" />,
       accentClass: "border-cyan-200 bg-cyan-50/70",
       iconClass: "bg-cyan-600 text-white",
-      image: "/wp-admin/uploads/residential-hero.webp",
     },
     {
       scope: "carpet",
@@ -221,7 +216,6 @@ const BookingClient = ({ services }: BookingClientProps) => {
       icon: <Sofa className="h-7 w-7" />,
       accentClass: "border-emerald-200 bg-emerald-50/70",
       iconClass: "bg-emerald-600 text-white",
-      image: "/wp-admin/uploads/cleaned floor.webp",
     },
   ];
 
@@ -268,7 +262,7 @@ const BookingClient = ({ services }: BookingClientProps) => {
           className="pointer-events-none absolute -right-20 bottom-0 h-80 w-80 rounded-full bg-cyan-100/70 blur-3xl"
         />
 
-        <div className="relative mx-auto grid max-w-6xl gap-10 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
+        <div className="relative mx-auto max-w-5xl">
           <motion.div
             initial={{ opacity: 0, x: -24 }}
             animate={{ opacity: 1, x: 0 }}
@@ -278,7 +272,7 @@ const BookingClient = ({ services }: BookingClientProps) => {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.08 }}
-              className="max-w-3xl text-4xl font-black leading-[1.05] text-slate-950 sm:text-5xl lg:text-[3.45rem]"
+              className="max-w-4xl text-4xl font-black leading-[1.05] text-slate-950 sm:text-5xl lg:text-[3.45rem]"
             >
               Professional Home Cleaning From {money0(standardEssential)}
             </motion.h1>
@@ -287,7 +281,7 @@ const BookingClient = ({ services }: BookingClientProps) => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.16 }}
-              className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg"
+              className="mt-5 max-w-3xl text-base leading-7 text-slate-600 sm:text-lg"
             >
               Our {money0(standardEssential)} Essential Standard Clean is a real package for 1 bedroom,
               1 full bathroom, 1 kitchen and 1 living area. Customize your home and see the updated
@@ -320,37 +314,6 @@ const BookingClient = ({ services }: BookingClientProps) => {
             </motion.div>
           </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, x: 28, scale: 0.96 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            transition={{ duration: 0.65, delay: 0.08, ease: "easeOut" }}
-            className="relative mx-auto w-full max-w-[520px]"
-          >
-            <motion.div
-              animate={{ y: [0, -6, 0] }}
-              whileHover={{ scale: 1.012 }}
-              transition={{ y: { duration: 5.5, repeat: Infinity, ease: "easeInOut" }, scale: { duration: 0.22 } }}
-              className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl shadow-slate-300/40"
-            >
-              <div className="relative aspect-[5/4] bg-gradient-to-br from-blue-50 to-cyan-50">
-                <Image
-                  src="/Banner-Image.webp"
-                  alt="Camz Cleaning professional cleaner"
-                  fill
-                  priority
-                  sizes="(max-width: 1024px) 92vw, 520px"
-                  className="object-cover object-center"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/15 via-transparent to-transparent" />
-              </div>
-
-              <div className="border-t border-slate-200 bg-white px-5 py-4">
-                <p className="text-sm font-semibold text-slate-700">
-                  Starting from <span className="font-black text-[#0B4E9B]">{money0(standardEssential)}</span> for 1 bedroom, 1 bathroom, 1 kitchen and 1 living area.
-                </p>
-              </div>
-            </motion.div>
-          </motion.div>
         </div>
       </section>
 
@@ -481,26 +444,18 @@ const BookingClient = ({ services }: BookingClientProps) => {
                   whileHover={{ y: -5 }}
                   className={`group relative flex h-full flex-col rounded-[1.4rem] border p-5 shadow-sm transition-shadow hover:shadow-xl sm:p-6 ${card.accentClass}`}
                 >
-                  <div className="relative mb-5 h-36 overflow-hidden rounded-2xl">
-                    <Image
-                      src={card.image}
-                      alt={card.eyebrow}
-                      fill
-                      sizes="(max-width: 1024px) 100vw, 420px"
-                      className="object-cover transition duration-500 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/35 to-transparent" />
-                    <div className={`absolute bottom-3 left-3 flex h-11 w-11 items-center justify-center rounded-xl shadow-lg ${card.iconClass}`}>
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <div className={`flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm ${card.iconClass}`}>
                       {card.icon}
                     </div>
                     {card.badge && (
-                      <span className="absolute right-3 top-3 rounded-full bg-white/95 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-700 shadow-sm backdrop-blur">
+                      <span className="rounded-full border border-blue-100 bg-white/80 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-700 shadow-sm">
                         {card.badge}
                       </span>
                     )}
                   </div>
 
-                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="pr-2">
                       <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
                         {card.eyebrow}
