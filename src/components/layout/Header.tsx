@@ -72,19 +72,19 @@ export default function Header() {
 
       {/* ⚪ NAVBAR */}
       <div className="bg-white">
-        <div className="mx-auto flex w-full max-w-[1560px] items-center justify-between gap-5 px-6 py-4 lg:gap-6 xl:px-8 xl:py-5">
-          <Link href="/" className="shrink-0">
+        <div className="mx-auto flex w-full max-w-[1920px] items-center justify-between gap-3 px-3 py-3 sm:px-4 lg:gap-4 lg:px-5 xl:gap-5 xl:px-6 2xl:px-8">
+          <Link href="/" className="shrink-0 self-center">
             <Image
               src="/logo.webp"
               alt="Camz Cleaning"
               width={608}
               height={174}
               priority
-              className="h-12 w-auto lg:h-14 xl:h-16"
+              className="h-10 w-auto sm:h-11 lg:h-12 xl:h-14 2xl:h-[58px]"
             />
           </Link>
 
-          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-3 whitespace-nowrap text-[13px] font-semibold text-[#0B4E9B] lg:flex xl:gap-5 xl:text-[15px]">
+          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-2.5 whitespace-nowrap text-[12px] font-semibold text-[#0B4E9B] lg:flex xl:gap-4 xl:text-[14px] 2xl:gap-5 2xl:text-[15px]">
             <Link href="/" className="hover:text-[#00B7EB] transition-colors">HOME</Link>
             <Link href="/about-us" className="hover:text-[#00B7EB] transition-colors">ABOUT US</Link>
 
@@ -117,12 +117,12 @@ export default function Header() {
           {/* Desktop Button */}
           <div className="hidden shrink-0 lg:block">
             {isAuthed ? (
-              <button onClick={handleDashboardClick} className="bg-[#0B4E9B] whitespace-nowrap text-white px-5 xl:px-7 py-3 rounded-lg text-sm xl:text-[15px] font-bold hover:bg-[#00B7EB] transition-all cursor-pointer">
+              <button onClick={handleDashboardClick} className="bg-[#0B4E9B] whitespace-nowrap text-white px-4 xl:px-6 py-2.5 xl:py-3 rounded-lg text-[13px] xl:text-[14px] font-bold hover:bg-[#00B7EB] transition-all cursor-pointer">
                 Dashboard
               </button>
             ) : (
               <Link href="/login">
-                <button className="bg-[#0B4E9B] whitespace-nowrap text-white px-5 xl:px-7 py-3 rounded-lg text-sm xl:text-[15px] font-bold hover:bg-[#00B7EB] transition-all">Login</button>
+                <button className="bg-[#0B4E9B] whitespace-nowrap text-white px-4 xl:px-6 py-2.5 xl:py-3 rounded-lg text-[13px] xl:text-[14px] font-bold hover:bg-[#00B7EB] transition-all">Login</button>
               </Link>
             )}
           </div>
