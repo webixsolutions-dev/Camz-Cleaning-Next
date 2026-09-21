@@ -2542,6 +2542,9 @@ const BookingModal = ({
                           />
                         )}
                       </div>
+                      <p className="mt-2 ml-1 text-[11px] font-semibold text-slate-500">
+                        Example: 800 Macleod Trail SE, Calgary, AB T2G 5E6
+                      </p>
 
                       <button
                         type="button"
