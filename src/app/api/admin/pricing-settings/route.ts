@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { enforceMutationSecurity, readJsonBody, securityErrorResponse } from "@/lib/security/http";
-import { CleaningPricingConfig, validatePricingConfig } from "@/lib/pricing/config";
+import { CleaningPricingConfig, DEFAULT_CLEANING_PRICING_CONFIG, validatePricingConfig } from "@/lib/pricing/config";
 
 const TABLE = "cleaning_pricing_config";
 const RECORD_ID = "default";
@@ -104,4 +104,67 @@ export async function PATCH(request: NextRequest) {
   }
 
   return NextResponse.json({ config: data.config, version: data.version, updatedAt: data.updated_at });
+}
+
+export async function POST(request: NextRequest) {
+  const securityError = await enforceMutationSecurity(request, {
+    bucket: "admin-pricing-settings-reset",
+    limit: 5,
+    windowSeconds: 60,
+  });
+  if (securityError) return securityError;
+
+  const { allowed, supabase, user } = await authorizeAdmin();
+  if (!allowed || !user) return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+
+  let body: { action?: string; version?: number };
+  try {
+    body = await readJsonBody(request, 16 * 1024);
+  } catch (error) {
+    return securityErrorResponse(error) || NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+
+  if (body.action !== "reset_defaults") {
+    return NextResponse.json({ error: "Unsupported pricing action." }, { status: 400 });
+  }
+
+  const version = Number(body.version);
+  if (!Number.isInteger(version) || version < 1) {
+    return NextResponse.json({ error: "Pricing settings version is required." }, { status: 400 });
+  }
+
+  // Validate the canonical master defaults before persisting them. This ensures
+  // Reset to default restores every pricing field, rule and add-on consistently.
+  const validation = validatePricingConfig(DEFAULT_CLEANING_PRICING_CONFIG);
+  if (!validation.ok) {
+    return NextResponse.json({ error: `Master pricing defaults are invalid: ${validation.error}` }, { status: 500 });
+  }
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({
+      config: validation.config,
+      version: version + 1,
+      updated_at: new Date().toISOString(),
+      updated_by: user.id,
+    })
+    .eq("id", RECORD_ID)
+    .eq("version", version)
+    .select("config,version,updated_at")
+    .maybeSingle();
+
+  if (error) return databaseError(error);
+  if (!data) {
+    return NextResponse.json(
+      { error: "Pricing settings changed in another session. Refresh the page and try again.", code: "VERSION_CONFLICT" },
+      { status: 409 },
+    );
+  }
+
+  return NextResponse.json({
+    config: data.config,
+    version: data.version,
+    updatedAt: data.updated_at,
+    reset: true,
+  });
 }

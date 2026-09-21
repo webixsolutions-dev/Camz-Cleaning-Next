@@ -5,7 +5,6 @@ import { AlertTriangle, BadgeDollarSign, Plus, RefreshCcw, Save, Trash2 } from "
 import {
   AddOnPricing,
   CleaningPricingConfig,
-  DEFAULT_CLEANING_PRICING_CONFIG,
   PRICING_AREA_LABELS,
   PRICING_SCOPE_LABELS,
   PricingAreaKey,
@@ -117,11 +116,35 @@ export default function PricingSettingsClient() {
     }
   };
 
-  const resetDefaults = () => {
-    if (!window.confirm("Reset the form to the Phase 1 master pricing defaults? You still need to click Save to persist them.")) return;
-    setConfig(clone(DEFAULT_CLEANING_PRICING_CONFIG));
-    setState("ready");
-    setMessage("Master defaults loaded. Click Save to persist them.");
+  const resetDefaults = async () => {
+    if (!config || state === "saving") return;
+
+    const confirmed = window.confirm(
+      "Reset ALL pricing settings to the master defaults? This will immediately overwrite saved package prices, room charges, carpet rates, add-ons, tax and review rules."
+    );
+    if (!confirmed) return;
+
+    setState("saving");
+    setMessage("Resetting all pricing to master defaults…");
+
+    try {
+      const response = await fetch("/api/admin/pricing-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_defaults", version }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Unable to reset pricing settings.");
+
+      setConfig(body.config);
+      setVersion(Number(body.version) || version + 1);
+      setUpdatedAt(body.updatedAt || null);
+      setState("ready");
+      setMessage("All pricing settings were reset to the master defaults.");
+    } catch (error) {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "Unable to reset pricing settings.");
+    }
   };
 
   const lastUpdated = useMemo(() => {
@@ -161,7 +184,14 @@ export default function PricingSettingsClient() {
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Database-driven master pricing for packages, room allowances, additional-area charges, add-ons, carpet pricing, tax, inclusion rules and review/custom-quote controls.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={resetDefaults} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"><RefreshCcw size={15} /> Load master defaults</button>
+            <button
+              type="button"
+              onClick={() => void resetDefaults()}
+              disabled={state === "saving"}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCcw size={15} /> {state === "saving" ? "Working…" : "Reset to default"}
+            </button>
             <button type="submit" disabled={state === "saving"} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#0B4E9B] px-5 text-sm font-bold text-white disabled:opacity-50"><Save size={16} />{state === "saving" ? "Saving…" : "Save settings"}</button>
           </div>
         </header>
