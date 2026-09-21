@@ -1775,33 +1775,62 @@ const BookingModal = ({
                 </div>
 
                 {quantityControlled ? (
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <div>
-                      <span className="block text-[10px] font-bold uppercase text-slate-400">Quantity</span>
-                      <span className="mt-0.5 block text-[10px] font-semibold text-slate-400">Max {maxQuantity}</span>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
-                      <button
-                        type="button"
-                        onClick={() => setAddOn(addOn.id, Math.max(0, quantity - 1))}
-                        disabled={quantity <= 0}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-35"
-                        aria-label={`Decrease ${addOn.name}`}
+                  addOn.id === "baseboards" ? (
+                    <div className="mt-3">
+                      <label
+                        htmlFor="baseboards-room-count"
+                        className="mb-2 block text-[10px] font-bold uppercase tracking-wide text-slate-400"
                       >
-                        <Minus size={14} />
-                      </button>
-                      <span className="min-w-8 text-center text-sm font-black text-slate-800">{quantity}</span>
-                      <button
-                        type="button"
-                        onClick={() => setAddOn(addOn.id, Math.min(maxQuantity, quantity + 1))}
-                        disabled={quantity >= maxQuantity}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                        aria-label={`Increase ${addOn.name}`}
+                        Select how many rooms / living areas
+                      </label>
+                      <select
+                        id="baseboards-room-count"
+                        value={quantity}
+                        onChange={(event) => setAddOn(addOn.id, Number(event.target.value))}
+                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                       >
-                        <Plus size={14} />
-                      </button>
+                        <option value={0}>Select rooms / living areas</option>
+                        {Array.from({ length: maxQuantity }, (_, index) => index + 1).map((count) => (
+                          <option key={count} value={count}>
+                            {count} {count === 1 ? "room / living area" : "rooms / living areas"}
+                          </option>
+                        ))}
+                      </select>
+                      {quantity > 0 && (
+                        <p className="mt-2 text-[10px] font-semibold text-blue-700">
+                          {quantity} × ${((addOn.priceCents || 0) / 100).toFixed(2)} = ${(((addOn.priceCents || 0) * quantity) / 100).toFixed(2)}
+                        </p>
+                      )}
                     </div>
-                  </div>
+                  ) : (
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <div>
+                        <span className="block text-[10px] font-bold uppercase text-slate-400">Quantity</span>
+                        <span className="mt-0.5 block text-[10px] font-semibold text-slate-400">Max {maxQuantity}</span>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setAddOn(addOn.id, Math.max(0, quantity - 1))}
+                          disabled={quantity <= 0}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-35"
+                          aria-label={`Decrease ${addOn.name}`}
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="min-w-8 text-center text-sm font-black text-slate-800">{quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAddOn(addOn.id, Math.min(maxQuantity, quantity + 1))}
+                          disabled={quantity >= maxQuantity}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                          aria-label={`Increase ${addOn.name}`}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )
                 ) : (
                   <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600">
                     <input

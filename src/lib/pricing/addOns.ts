@@ -29,6 +29,8 @@ export type AddOnPricingResult = {
 const DEFAULT_MAX_ADDON_QUANTITY = 20;
 
 export const ADD_ON_QUANTITY_LIMITS: Record<string, number> = {
+  // Baseboards are priced per selected room / living area.
+  baseboards: 20,
   wet_wipe_blinds: 10,
   interior_window_glass_tracks: 15,
   bed_linen_change: 8,
