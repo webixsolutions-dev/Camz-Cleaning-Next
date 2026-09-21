@@ -72,15 +72,19 @@ export default function Header() {
 
       {/* ⚪ NAVBAR */}
       <div className="bg-white">
-        <div className="mx-auto flex w-full max-w-[1920px] items-center justify-between gap-3 px-3 py-3 sm:px-4 lg:gap-4 lg:px-5 xl:gap-5 xl:px-6 2xl:px-8">
-          <Link href="/" className="shrink-0 self-center">
+        <div className="mx-auto flex w-full max-w-[1920px] items-center justify-between gap-3 px-4 py-3 sm:px-5 lg:gap-4 lg:px-6 lg:py-3.5 xl:gap-5 xl:px-7 2xl:px-8">
+          <Link href="/" className="-ml-2 shrink-0 self-center sm:-ml-3 lg:-ml-4">
             <Image
               src="/logo.webp"
               alt="Camz Cleaning"
               width={608}
               height={174}
               priority
-              className="h-10 w-auto sm:h-11 lg:h-12 xl:h-14 2xl:h-[58px]"
+              className="block h-auto max-w-none"
+              style={{
+                width: "clamp(220px, 17vw, 320px)",
+                height: "auto",
+              }}
             />
           </Link>
 

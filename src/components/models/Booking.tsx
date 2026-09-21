@@ -393,7 +393,6 @@ const BookingModal = ({
   
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
-  const [guestEmailConfirm, setGuestEmailConfirm] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [conditionPhotos, setConditionPhotos] = useState<File[]>([]);
   const [uploadedConditionPhotoPaths, setUploadedConditionPhotoPaths] = useState<string[]>([]);
@@ -532,11 +531,6 @@ const BookingModal = ({
         alert("Please enter a valid email address.");
         return;
       }
-      if (guestEmail !== guestEmailConfirm) {
-        scrollToBookingField("booking-guest-email-confirm");
-        alert("Email and confirm email must match.");
-        return;
-      }
       if (!isValidCanadianPhone(guestPhone)) {
         scrollToBookingField("booking-guest-phone");
         alert("Please enter a valid Canadian phone number in the format (403) 555-0123.");
@@ -661,7 +655,6 @@ const BookingModal = ({
       return (
         guestName.trim().length >= 2 &&
         emailValid &&
-        guestEmail === guestEmailConfirm &&
         isValidCanadianPhone(guestPhone) &&
         standardPricingReady &&
         carpetSelectionReady &&
@@ -1392,7 +1385,6 @@ const BookingModal = ({
       setCoordinates(null);
       setGuestName("");
       setGuestEmail("");
-      setGuestEmailConfirm("");
       setGuestPhone("");
       setConditionPhotos([]);
       setUploadedConditionPhotoPaths([]);
@@ -2321,25 +2313,6 @@ const BookingModal = ({
                       {guestEmail.length > 0 && !EMAIL_PATTERN.test(guestEmail) && (
                         <p className="ml-1 text-[10px] font-bold text-red-500">Enter a valid email address.</p>
                       )}
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
-                        Confirm Email
-                      </label>
-                      <input
-                        id="booking-guest-email-confirm"
-                        type="email"
-                        value={guestEmailConfirm}
-                        onChange={(e) => setGuestEmailConfirm(e.target.value)}
-                        placeholder="you@example.com"
-                        className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
-                      />
-                      {guestEmailConfirm.length > 0 &&
-                        guestEmail !== guestEmailConfirm && (
-                          <p className="text-[10px] text-red-500 ml-1 font-bold">
-                            Emails do not match
-                          </p>
-                        )}
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
