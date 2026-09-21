@@ -33,7 +33,7 @@ export default function Header() {
   const serviceLinks = [
     { name: "COMMERCIAL CLEANING", href: "/commercial-cleaning-services" },
     { name: "RESIDENTIAL CLEANING", href: "/residential-cleaning-services" },
-    { name: "VEHICLE CLEANING", href: "/vehicle-cleaning-service" },
+    { name: "AIRBNB CLEANING", href: "/airbnb-cleaning-services/" },
     { name: "SEASONAL CLEANING", href: "/seasonal-property-service" },
   ];
 
