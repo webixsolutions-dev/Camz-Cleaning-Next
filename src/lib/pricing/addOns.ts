@@ -26,12 +26,31 @@ export type AddOnPricingResult = {
   customQuoteReason: string | null;
 };
 
-const MAX_ADDON_QUANTITY = 50;
+const DEFAULT_MAX_ADDON_QUANTITY = 20;
 
-const clampQuantity = (value: unknown) => {
+export const ADD_ON_QUANTITY_LIMITS: Record<string, number> = {
+  wet_wipe_blinds: 10,
+  interior_window_glass_tracks: 15,
+  bed_linen_change: 8,
+  dishes: 5,
+  laundry: 5,
+  hard_water_grout_restoration: 5,
+  wall_washing: 10,
+  balcony_patio_basic: 5,
+};
+
+export const getAddOnQuantityLimit = (id: string) =>
+  ADD_ON_QUANTITY_LIMITS[id] ?? DEFAULT_MAX_ADDON_QUANTITY;
+
+export const isQuantityControlledAddOn = (
+  id: string,
+  priceType: AddOnPricing["priceType"],
+) => priceType === "per_unit" || Object.prototype.hasOwnProperty.call(ADD_ON_QUANTITY_LIMITS, id);
+
+const clampQuantity = (value: unknown, maxQuantity = DEFAULT_MAX_ADDON_QUANTITY) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
-  return Math.min(MAX_ADDON_QUANTITY, Math.max(0, Math.floor(parsed)));
+  return Math.min(maxQuantity, Math.max(0, Math.floor(parsed)));
 };
 
 export function getVisibleAddOns(
@@ -66,12 +85,12 @@ export function calculateServiceAddOns(
 
   for (const addOn of visibleAddOns) {
     const rawValue = normalizedSelection[addOn.id];
-    const quantity =
-      addOn.priceType === "per_unit"
-        ? clampQuantity(rawValue)
-        : rawValue === true || rawValue === 1 || rawValue === "1"
-          ? 1
-          : 0;
+    const quantityControlled = isQuantityControlledAddOn(addOn.id, addOn.priceType);
+    const quantity = quantityControlled
+      ? clampQuantity(rawValue, getAddOnQuantityLimit(addOn.id))
+      : rawValue === true || rawValue === 1 || rawValue === "1"
+        ? 1
+        : 0;
 
     if (quantity <= 0) continue;
 

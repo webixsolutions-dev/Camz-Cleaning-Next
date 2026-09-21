@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronRight,
@@ -38,7 +38,12 @@ import { calculateDeepCleaningPrice } from "@/lib/pricing/deep";
 import { calculateMoveInOutPrice } from "@/lib/pricing/moveInOut";
 import { calculateCarpetPrice, carpetAreaCount } from "@/lib/pricing/carpet";
 import { resolveCleaningPricingScope } from "@/lib/pricing/serviceScope";
-import { calculateServiceAddOns, getVisibleAddOns } from "@/lib/pricing/addOns";
+import {
+  calculateServiceAddOns,
+  getAddOnQuantityLimit,
+  getVisibleAddOns,
+  isQuantityControlledAddOn,
+} from "@/lib/pricing/addOns";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -55,7 +60,26 @@ const SERVICE_AREAS = [
 type ServiceArea = (typeof SERVICE_AREAS)[number];
 
 const SERVICE_AREA_LABEL = "Calgary, Airdrie, Cochrane and Chestermere";
-const isValidPhone = (value: string) => value.replace(/\D/g, "").length >= 7;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const getCanadianPhoneDigits = (value: string) => {
+  let digits = value.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
+  return digits.slice(0, 10);
+};
+
+const formatCanadianPhone = (value: string) => {
+  const digits = getCanadianPhoneDigits(value);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+};
+
+const isValidCanadianPhone = (value: string) => {
+  const digits = getCanadianPhoneDigits(value);
+  return /^[2-9]\d{2}[2-9]\d{6}$/.test(digits);
+};
+
 const CANADIAN_POSTAL_CODE_PATTERN =
   /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ][ -]?\d[ABCEGHJ-NPRSTVWXYZ]\d$/i;
 
@@ -373,6 +397,8 @@ const BookingModal = ({
   const [guestPhone, setGuestPhone] = useState("");
   const [conditionPhotos, setConditionPhotos] = useState<File[]>([]);
   const [uploadedConditionPhotoPaths, setUploadedConditionPhotoPaths] = useState<string[]>([]);
+  const [hasReviewedStepOne, setHasReviewedStepOne] = useState(false);
+  const modalScrollRef = useRef<HTMLDivElement | null>(null);
 
   const totalSteps = 4;
   const cleaningPricingScope = resolveCleaningPricingScope(service);
@@ -410,6 +436,20 @@ const BookingModal = ({
     setValidatedPostalCode("");
     setLocationStatus("error");
     setLocationMessage(message);
+  };
+
+  const scrollToBookingField = (id: string) => {
+    requestAnimationFrame(() => {
+      const element = document.getElementById(id);
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLSelectElement ||
+        element instanceof HTMLTextAreaElement
+      ) {
+        element.focus({ preventScroll: true });
+      }
+    });
   };
 
   const validateEnteredLocation = async () => {
@@ -482,20 +522,24 @@ const BookingModal = ({
 
     if (step === 1 && isGuest) {
       if (guestName.trim().length < 2) {
-        alert("Please enter your name");
+        scrollToBookingField("booking-guest-name");
+        alert("Please enter your full name.");
         return;
       }
-      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail);
+      const emailValid = EMAIL_PATTERN.test(guestEmail);
       if (!emailValid) {
-        alert("Please enter a valid email");
+        scrollToBookingField("booking-guest-email");
+        alert("Please enter a valid email address.");
         return;
       }
       if (guestEmail !== guestEmailConfirm) {
-        alert("Emails do not match");
+        scrollToBookingField("booking-guest-email-confirm");
+        alert("Email and confirm email must match.");
         return;
       }
-      if (!isValidPhone(guestPhone)) {
-        alert("Please enter a valid phone number");
+      if (!isValidCanadianPhone(guestPhone)) {
+        scrollToBookingField("booking-guest-phone");
+        alert("Please enter a valid Canadian phone number in the format (403) 555-0123.");
         return;
       }
     }
@@ -503,23 +547,28 @@ const BookingModal = ({
     if (step === 1 && cleaningPricingScope) {
       if (!isGuest) {
         if (String(formData.customerName || "").trim().length < 2) {
+          scrollToBookingField("booking-customer-name");
           alert("Please enter the customer name.");
           return;
         }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(formData.customerEmail || ""))) {
+        if (!EMAIL_PATTERN.test(String(formData.customerEmail || ""))) {
+          scrollToBookingField("booking-customer-email");
           alert("Please enter a valid email address.");
           return;
         }
-        if (!isValidPhone(String(formData.customerPhone || ""))) {
-          alert("Please enter a valid phone number.");
+        if (!isValidCanadianPhone(String(formData.customerPhone || ""))) {
+          scrollToBookingField("booking-customer-phone");
+          alert("Please enter a valid Canadian phone number in the format (403) 555-0123.");
           return;
         }
       }
       if (!formData.propertyType) {
+        scrollToBookingField("booking-property-type");
         alert("Please select the property type.");
         return;
       }
       if (!formData.propertyCondition) {
+        scrollToBookingField("booking-property-condition");
         alert("Please select the property condition.");
         return;
       }
@@ -527,11 +576,20 @@ const BookingModal = ({
         cleaningPricingScope === "move_in_out" &&
         typeof formData.movePropertyEmpty !== "boolean"
       ) {
+        scrollToBookingField("booking-move-empty");
         alert("Please confirm whether the property will be empty.");
         return;
       }
       if (requiresConditionPhotos() && conditionPhotos.length === 0) {
+        scrollToBookingField("booking-condition-photos");
         alert("Please add at least one condition photo for admin review.");
+        return;
+      }
+
+      if (!hasReviewedStepOne) {
+        const scroller = modalScrollRef.current;
+        scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+        alert("Please review the full service options and add-on list before continuing.");
         return;
       }
     }
@@ -586,8 +644,8 @@ const BookingModal = ({
       isGuest ||
       !cleaningPricingScope ||
       (String(formData.customerName || "").trim().length >= 2 &&
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(formData.customerEmail || "")) &&
-        isValidPhone(String(formData.customerPhone || "")));
+        EMAIL_PATTERN.test(String(formData.customerEmail || "")) &&
+        isValidCanadianPhone(String(formData.customerPhone || "")));
 
     const cleaningDetailsReady =
       !cleaningPricingScope ||
@@ -599,12 +657,12 @@ const BookingModal = ({
         (!requiresConditionPhotos() || conditionPhotos.length > 0));
 
     if (step === 1 && isGuest) {
-      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail);
+      const emailValid = EMAIL_PATTERN.test(guestEmail);
       return (
         guestName.trim().length >= 2 &&
         emailValid &&
         guestEmail === guestEmailConfirm &&
-        isValidPhone(guestPhone) &&
+        isValidCanadianPhone(guestPhone) &&
         standardPricingReady &&
         carpetSelectionReady &&
         cleaningDetailsReady
@@ -1126,7 +1184,9 @@ const BookingModal = ({
   const initialCleaningFields = () => ({
     customerName: isGuest ? "" : user?.user_metadata?.name || user?.user_metadata?.full_name || "",
     customerEmail: isGuest ? "" : user?.email || "",
-    customerPhone: isGuest ? "" : user?.user_metadata?.phone || user?.user_metadata?.phone_number || "",
+    customerPhone: isGuest
+      ? ""
+      : formatCanadianPhone(user?.user_metadata?.phone || user?.user_metadata?.phone_number || ""),
     bedrooms: 1,
     fullBathrooms: 1,
     halfBathrooms: 0,
@@ -1181,7 +1241,9 @@ const BookingModal = ({
       setFormData({
         customerName: isGuest ? "" : user?.user_metadata?.name || user?.user_metadata?.full_name || "",
         customerEmail: isGuest ? "" : user?.email || "",
-        customerPhone: isGuest ? "" : user?.user_metadata?.phone || user?.user_metadata?.phone_number || "",
+        customerPhone: isGuest
+          ? ""
+          : formatCanadianPhone(user?.user_metadata?.phone || user?.user_metadata?.phone_number || ""),
         propertyType: "house",
         propertyCondition: "regular",
         additionalInstructions: "",
@@ -1293,6 +1355,25 @@ const BookingModal = ({
     };
   }, [isOpen, cleaningPricingScope]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setHasReviewedStepOne(false);
+    requestAnimationFrame(() => {
+      modalScrollRef.current?.scrollTo({ top: 0 });
+    });
+  }, [isOpen, service?.id]);
+
+  useEffect(() => {
+    if (!isOpen || step !== 1) return;
+    const timer = window.setTimeout(() => {
+      const scroller = modalScrollRef.current;
+      if (scroller && scroller.scrollHeight <= scroller.clientHeight + 32) {
+        setHasReviewedStepOne(true);
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, step, loadingConfig, cleaningPricingConfig, isGuest]);
+
   // Reset on close
   useEffect(() => {
     if (!isOpen) {
@@ -1324,6 +1405,7 @@ const BookingModal = ({
       setValidatedPostalCode("");
       setCleaningPricingConfig(null);
       setPricingConfigError(null);
+      setHasReviewedStepOne(false);
     }
   }, [isOpen]);
 
@@ -1443,6 +1525,7 @@ const BookingModal = ({
           <div className="space-y-1.5">
             <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Property Type</label>
             <select
+              id="booking-property-type"
               value={formData.propertyType || "house"}
               onChange={(e) => updateField("propertyType", e.target.value)}
               className={cleaningSelectClass}
@@ -1460,6 +1543,7 @@ const BookingModal = ({
           <div className="space-y-1.5">
             <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Property Condition</label>
             <select
+              id="booking-property-condition"
               value={formData.propertyCondition || "regular"}
               onChange={(e) => {
                 updateField("propertyCondition", e.target.value);
@@ -1477,7 +1561,7 @@ const BookingModal = ({
         </div>
 
         {cleaningPricingScope === "move_in_out" && (
-          <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+          <div id="booking-move-empty" className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
             <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-emerald-700">
               Will the property be empty at the time of service?
             </p>
@@ -1584,7 +1668,7 @@ const BookingModal = ({
       </div>
 
       {(formData.propertyCondition === "heavy" || requiresConditionPhotos()) && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+        <div id="booking-condition-photos" className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
             <div className="flex-1">
@@ -1673,12 +1757,17 @@ const BookingModal = ({
 
         <div className="space-y-3">
           {visibleAddOns.map((addOn) => {
-            const perUnit = addOn.priceType === "per_unit";
-            const quantity = perUnit ? Number(selected[addOn.id] || 0) : selected[addOn.id] ? 1 : 0;
+            const quantityControlled = isQuantityControlledAddOn(addOn.id, addOn.priceType);
+            const maxQuantity = getAddOnQuantityLimit(addOn.id);
+            const quantity = quantityControlled
+              ? Math.min(maxQuantity, Math.max(0, Number(selected[addOn.id] || 0)))
+              : selected[addOn.id]
+                ? 1
+                : 0;
             const priceLabel =
               addOn.priceType === "custom_quote"
                 ? "Custom quote"
-                : `${addOn.priceType === "from" ? "From " : ""}$${((addOn.priceCents || 0) / 100).toFixed(2)}${perUnit && addOn.unit ? ` / ${addOn.unit}` : ""}`;
+                : `${addOn.priceType === "from" ? "From " : ""}$${((addOn.priceCents || 0) / 100).toFixed(2)}${quantityControlled && addOn.unit ? ` / ${addOn.unit}` : ""}`;
 
             return (
               <div key={addOn.id} className={`rounded-xl border p-3 transition ${quantity > 0 ? "border-blue-200 bg-blue-50/50" : "border-slate-200 bg-slate-50"}`}>
@@ -1693,18 +1782,33 @@ const BookingModal = ({
                   <span className="shrink-0 text-xs font-black text-blue-700">{priceLabel}</span>
                 </div>
 
-                {perUnit ? (
+                {quantityControlled ? (
                   <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-[10px] font-bold uppercase text-slate-400">Quantity</span>
-                    <select
-                      value={quantity}
-                      onChange={(e) => setAddOn(addOn.id, Number(e.target.value))}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 outline-none focus:ring-2 focus:ring-blue-100"
-                    >
-                      {Array.from({ length: 21 }, (_, index) => (
-                        <option key={index} value={index}>{index}</option>
-                      ))}
-                    </select>
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase text-slate-400">Quantity</span>
+                      <span className="mt-0.5 block text-[10px] font-semibold text-slate-400">Max {maxQuantity}</span>
+                    </div>
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => setAddOn(addOn.id, Math.max(0, quantity - 1))}
+                        disabled={quantity <= 0}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-35"
+                        aria-label={`Decrease ${addOn.name}`}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="min-w-8 text-center text-sm font-black text-slate-800">{quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAddOn(addOn.id, Math.min(maxQuantity, quantity + 1))}
+                        disabled={quantity >= maxQuantity}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                        aria-label={`Increase ${addOn.name}`}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-600">
@@ -2153,7 +2257,17 @@ const BookingModal = ({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto bg-slate-50/60 p-4 sm:p-6">
+        <div
+          ref={modalScrollRef}
+          onScroll={(event) => {
+            if (step !== 1 || hasReviewedStepOne) return;
+            const scroller = event.currentTarget;
+            const reachedBottom =
+              scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 48;
+            if (reachedBottom) setHasReviewedStepOne(true);
+          }}
+          className="flex-1 overflow-y-auto bg-slate-50/60 p-4 sm:p-6"
+        >
           <AnimatePresence mode="wait">
             {step === 1 && (
               <motion.div
@@ -2184,6 +2298,7 @@ const BookingModal = ({
                         Full Name
                       </label>
                       <input
+                        id="booking-guest-name"
                         type="text"
                         value={guestName}
                         onChange={(e) => setGuestName(e.target.value)}
@@ -2196,18 +2311,23 @@ const BookingModal = ({
                         Email
                       </label>
                       <input
+                        id="booking-guest-email"
                         type="email"
                         value={guestEmail}
                         onChange={(e) => setGuestEmail(e.target.value)}
                         placeholder="you@example.com"
                         className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                       />
+                      {guestEmail.length > 0 && !EMAIL_PATTERN.test(guestEmail) && (
+                        <p className="ml-1 text-[10px] font-bold text-red-500">Enter a valid email address.</p>
+                      )}
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-[11px] font-black uppercase text-slate-500 ml-1">
                         Confirm Email
                       </label>
                       <input
+                        id="booking-guest-email-confirm"
                         type="email"
                         value={guestEmailConfirm}
                         onChange={(e) => setGuestEmailConfirm(e.target.value)}
@@ -2228,13 +2348,19 @@ const BookingModal = ({
                       <div className="relative">
                         <Phone size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input
+                          id="booking-guest-phone"
                           type="tel"
+                          inputMode="tel"
+                          maxLength={14}
                           value={guestPhone}
-                          onChange={(e) => setGuestPhone(e.target.value)}
+                          onChange={(e) => setGuestPhone(formatCanadianPhone(e.target.value))}
                           placeholder="(403) 555-0123"
                           className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                         />
                       </div>
+                      {guestPhone.length > 0 && !isValidCanadianPhone(guestPhone) && (
+                        <p className="ml-1 text-[10px] font-bold text-red-500">Use a valid Canadian number: (403) 555-0123.</p>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2247,6 +2373,7 @@ const BookingModal = ({
                       <div className="space-y-1.5 sm:col-span-2">
                         <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Full Name</label>
                         <input
+                          id="booking-customer-name"
                           type="text"
                           value={formData.customerName || ""}
                           onChange={(e) => updateField("customerName", e.target.value)}
@@ -2257,22 +2384,32 @@ const BookingModal = ({
                       <div className="space-y-1.5">
                         <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Email</label>
                         <input
+                          id="booking-customer-email"
                           type="email"
                           value={formData.customerEmail || ""}
                           onChange={(e) => updateField("customerEmail", e.target.value)}
                           className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                           placeholder="you@example.com"
                         />
+                        {String(formData.customerEmail || "").length > 0 && !EMAIL_PATTERN.test(String(formData.customerEmail || "")) && (
+                          <p className="ml-1 text-[10px] font-bold text-red-500">Enter a valid email address.</p>
+                        )}
                       </div>
                       <div className="space-y-1.5">
                         <label className="ml-1 text-[11px] font-black uppercase text-slate-500">Phone Number</label>
                         <input
+                          id="booking-customer-phone"
                           type="tel"
+                          inputMode="tel"
+                          maxLength={14}
                           value={formData.customerPhone || ""}
-                          onChange={(e) => updateField("customerPhone", e.target.value)}
+                          onChange={(e) => updateField("customerPhone", formatCanadianPhone(e.target.value))}
                           className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70"
                           placeholder="(403) 555-0123"
                         />
+                        {String(formData.customerPhone || "").length > 0 && !isValidCanadianPhone(String(formData.customerPhone || "")) && (
+                          <p className="ml-1 text-[10px] font-bold text-red-500">Use a valid Canadian number: (403) 555-0123.</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2919,16 +3056,16 @@ const BookingModal = ({
             <button
               onClick={step === totalSteps ? handleConfirm : nextStep}
               disabled={
-                !isStepValid() ||
                 isSubmitting ||
                 isValidatingAddress ||
-                loadingLocation
+                loadingLocation ||
+                (step !== 1 && !isStepValid())
               }
               className={`flex-1 py-3 rounded-xl text-white text-xs font-black flex items-center justify-center gap-2 shadow-xl shadow-blue-200 transition-all ${
-                !isStepValid() ||
                 isSubmitting ||
                 isValidatingAddress ||
-                loadingLocation
+                loadingLocation ||
+                (step !== 1 && !isStepValid())
                   ? "bg-blue-300 cursor-not-allowed"
                   : "bg-blue-600 hover:bg-blue-700"
               }`}
