@@ -6,7 +6,7 @@ const ServiceSidebar = () => {
   const services = [
     { name: "Commercial Cleaning", href: "/commercial-cleaning-services/" },
     { name: "Residential Cleaning", href: "/residential-cleaning-services/" },
-    { name: "Vehicle Cleaning Service", href: "/vehicle-cleaning-service/" },
+    { name: "Airbnb Cleaning", href: "/airbnb-cleaning-services/" },
     { name: "Seasonal Property Service", href: "/seasonal-property-service/" },
   ];
 
