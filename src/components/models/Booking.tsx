@@ -402,6 +402,95 @@ const BookingModal = ({
   const totalSteps = 4;
   const cleaningPricingScope = resolveCleaningPricingScope(service);
 
+  const serviceTransparency = cleaningPricingScope
+    ? {
+        standard: {
+          included: [
+            "Accessible dusting and wiping",
+            "Doors and handles",
+            "Light switches and window sills",
+            "Kitchen counters, backsplash, sink and stovetop",
+            "Appliance exteriors",
+            "General bathroom cleaning",
+            "Garbage removal",
+            "Vacuuming / sweeping and mopping in included areas",
+          ],
+          notIncluded: [
+            "Inside microwave, fridge or oven",
+            "Inside empty cabinets",
+            "Baseboards",
+            "Wet-wipe blinds",
+            "Interior window glass and tracks",
+            "Dishes and laundry",
+            "Wall washing",
+            "Carpet steam cleaning",
+          ],
+        },
+        deep: {
+          included: [
+            "Standard cleaning tasks",
+            "Detailed dusting and wiping",
+            "Detailed kitchen surfaces",
+            "Detailed bathroom cleaning",
+            "Baseboards and door frames",
+            "Detailed doors and switches",
+            "Edges, corners and extra-detail attention",
+            "Vacuuming and mopping",
+          ],
+          notIncluded: [
+            "Inside fridge or oven",
+            "Inside empty cabinets",
+            "Wet-wipe blinds",
+            "Interior window glass and tracks",
+            "Dishes and laundry",
+            "Hard-water / grout restoration",
+            "Wall washing or balcony / patio cleaning",
+            "Carpet steam cleaning",
+          ],
+        },
+        move_in_out: {
+          included: [
+            "Standard turnover cleaning",
+            "Baseboards",
+            "Doors and door frames",
+            "Light switches",
+            "Empty closets and shelves",
+            "Inside empty refrigerator",
+            "Inside oven in normal condition",
+            "Inside microwave",
+            "Inside empty kitchen cabinets and drawers",
+            "Cabinet fronts and accessible floors",
+          ],
+          notIncluded: [
+            "Interior windows and tracks",
+            "Blinds",
+            "Wall washing",
+            "Carpet steam cleaning",
+            "Severe grout / hard-water restoration",
+            "Excessive grease",
+            "Balcony / patio or garage cleaning",
+            "Construction debris or junk removal",
+          ],
+        },
+        carpet: {
+          included: [
+            "Selected standard carpeted rooms",
+            "Selected living / larger rooms",
+            "Selected hallways and carpeted stair flights",
+            "Selected small area rugs",
+            "Selected heavy stain treatment areas",
+          ],
+          notIncluded: [
+            "General home cleaning",
+            "Hard-floor cleaning",
+            "Furniture / sofa cleaning unless separately quoted",
+            "Pet urine or odour treatment without a custom quote",
+            "Restoration work outside the selected carpet areas",
+          ],
+        },
+      }[cleaningPricingScope]
+    : null;
+
   const getCalgaryNow = () => dayjs().tz(CALGARY_TIME_ZONE);
 
   const getSelectedDateTime = () => {
@@ -2299,8 +2388,70 @@ const BookingModal = ({
               >
                 <div className="mb-5">
                   <h2 className="text-2xl font-black text-slate-900">Customize your service</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">Choose the property details and options that match this booking.</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">See the included scope first, then choose only the rooms and add-ons you need.</p>
                 </div>
+
+                {serviceTransparency && (
+                  <div className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
+                      <p className="text-sm font-black text-slate-900">What&apos;s included in your service</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        Review what is included by default and what is optional before customizing your clean.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-0 lg:grid-cols-2">
+                      <div className="border-b border-slate-200 bg-teal-50/35 lg:border-b-0 lg:border-r">
+                        <div className="flex items-center gap-2 border-b border-teal-100 bg-teal-50 px-4 py-3.5 sm:px-5">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-100 text-teal-700">
+                            <Check className="h-4 w-4" strokeWidth={2.5} />
+                          </span>
+                          <div>
+                            <p className="text-sm font-black text-slate-900">Included</p>
+                            <p className="text-[11px] text-slate-500">Included in the selected service</p>
+                          </div>
+                        </div>
+                        <div className="space-y-2 p-4 sm:p-5">
+                          {serviceTransparency.included.map((item) => (
+                            <div key={item} className="flex items-start gap-2.5 rounded-xl bg-white/90 px-3 py-2.5 shadow-sm ring-1 ring-teal-100/80">
+                              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-100 text-teal-700">
+                                <Check size={13} strokeWidth={2.5} />
+                              </span>
+                              <span className="text-xs font-semibold leading-5 text-slate-700">{item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="bg-rose-50/25">
+                        <div className="flex items-center gap-2 border-b border-rose-100 bg-rose-50 px-4 py-3.5 sm:px-5">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                            <X className="h-4 w-4" strokeWidth={2.7} />
+                          </span>
+                          <div>
+                            <p className="text-sm font-black text-slate-900">Not included by default</p>
+                            <p className="text-[11px] text-slate-500">Available separately when applicable</p>
+                          </div>
+                        </div>
+                        <div className="space-y-2 p-4 sm:p-5">
+                          {serviceTransparency.notIncluded.map((item) => (
+                            <div key={item} className="flex items-start gap-2.5 rounded-xl bg-white/90 px-3 py-2.5 shadow-sm ring-1 ring-rose-100/80">
+                              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600" aria-label="Not included">
+                                <X size={13} strokeWidth={2.7} />
+                              </span>
+                              <span className="text-xs font-semibold leading-5 text-slate-700">{item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-100 bg-white px-4 py-3 text-[11px] leading-5 text-slate-500 sm:px-5">
+                      Optional services shown below can be added when relevant. Included tasks are automatically protected from duplicate charges.
+                    </div>
+                  </div>
+                )}
+
                 {cleaningPricingScope && (
                   <div className="mb-5 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
@@ -2542,9 +2693,6 @@ const BookingModal = ({
                           />
                         )}
                       </div>
-                      <p className="mt-2 ml-1 text-[11px] font-semibold text-slate-500">
-                        Example: 800 Macleod Trail SE, Calgary, AB T2G 5E6
-                      </p>
 
                       <button
                         type="button"

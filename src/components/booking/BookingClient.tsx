@@ -5,6 +5,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
   Building2,
+  CalendarDays,
+  Check,
   CheckCircle2,
   Home,
   Info,
@@ -58,22 +60,20 @@ export interface Service {
 
 interface BookingClientProps {
   services: Service[];
-  // Kept optional for backward compatibility with older booking pages
-  // and the customer-dashboard booking flow.
   categories?: Category[];
 }
 
 type ServiceCardDefinition = {
   scope: CleaningPricingScope;
-  eyebrow: string;
   title: string;
   priceLabel: string;
   description: string;
   features: string[];
-  badge?: string;
+  note: string;
   icon: React.ReactNode;
-  accentClass: string;
-  iconClass: string;
+  accent: string;
+  soft: string;
+  border: string;
 };
 
 const money0 = (cents: number) => `$${Math.round(cents / 100)}`;
@@ -89,10 +89,11 @@ const BookingClient = ({ services }: BookingClientProps) => {
   const [isGuestBooking, setIsGuestBooking] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [showPricingPopup, setShowPricingPopup] = useState(false);
+  const [heroPreviewIndex, setHeroPreviewIndex] = useState(0);
+  const [activeMobileCardScope, setActiveMobileCardScope] = useState<CleaningPricingScope>("standard");
 
   useEffect(() => {
     let cancelled = false;
-
     const loadPricing = async () => {
       try {
         const response = await fetch("/api/pricing", { cache: "no-store" });
@@ -100,7 +101,7 @@ const BookingClient = ({ services }: BookingClientProps) => {
         const payload = (await response.json()) as { config?: CleaningPricingConfig };
         if (!cancelled && payload.config) setPublicPricing(payload.config);
       } catch {
-        // Keep the documented customer-facing fallback prices if the API is temporarily unavailable.
+        // Customer-facing fallback prices remain available if pricing API is unavailable.
       }
     };
 
@@ -116,13 +117,10 @@ const BookingClient = ({ services }: BookingClientProps) => {
     for (const service of services) {
       const scope = resolveCleaningPricingScope(service);
       if (!scope) continue;
-
       if (!result[scope]) {
         result[scope] = service;
         continue;
       }
-
-      // Prefer an explicitly named Standard service over a generic residential row.
       if (
         scope === "standard" &&
         /standard/i.test(service.title) &&
@@ -136,13 +134,11 @@ const BookingClient = ({ services }: BookingClientProps) => {
   }, [services]);
 
   const standardEssential =
-    publicPricing?.services.standard.packages.find(
-      (pkg) => pkg.id === "essential_standard",
-    )?.basePriceCents ?? 9900;
+    publicPricing?.services.standard.packages.find((pkg) => pkg.id === "essential_standard")
+      ?.basePriceCents ?? 9900;
   const standardComplete =
-    publicPricing?.services.standard.packages.find(
-      (pkg) => pkg.id === "complete_standard",
-    )?.basePriceCents ?? 14900;
+    publicPricing?.services.standard.packages.find((pkg) => pkg.id === "complete_standard")
+      ?.basePriceCents ?? 14900;
   const deepStart = publicPricing?.services.deep.startingPriceCents ?? 15900;
   const moveStart = publicPricing?.services.move_in_out.startingPriceCents ?? 19900;
   const carpetMinimum = publicPricing?.carpet.standaloneMinimumCents ?? 10000;
@@ -150,85 +146,101 @@ const BookingClient = ({ services }: BookingClientProps) => {
   const serviceCards: ServiceCardDefinition[] = [
     {
       scope: "standard",
-      eyebrow: "Standard Cleaning",
-      title: "Essential & Complete Standard Clean",
+      title: "Standard Cleaning",
       priceLabel: `From ${money0(standardEssential)}`,
-      description:
-        "Choose the package that fits your home, then customize rooms and optional services with a live price update.",
+      description: "Routine cleaning for regularly maintained homes, with a clear included scope and optional extras.",
       features: [
-        `Essential: 1 bedroom + 1 full bathroom + kitchen + living area — ${money0(standardEssential)}`,
-        `Complete: up to 2 bedrooms + 2 full bathrooms + kitchen + living area — ${money0(standardComplete)}`,
-        "Vacuuming or sweeping and mopping in included areas",
-        "Additional rooms are charged only when they exceed the package allowance",
+        "Accessible dusting & wiping",
+        "Kitchen surfaces",
+        "General bathroom cleaning",
+        "Vacuuming, sweeping & mopping",
       ],
-      badge: "Most flexible",
-      icon: <Home className="h-7 w-7" />,
-      accentClass: "border-blue-200 bg-blue-50/70",
-      iconClass: "bg-blue-600 text-white",
+      note: `Essential ${money0(standardEssential)} · Complete ${money0(standardComplete)}`,
+      icon: <Home className="h-6 w-6" />,
+      accent: "text-teal-700",
+      soft: "bg-teal-50",
+      border: "border-teal-100",
     },
     {
       scope: "deep",
-      eyebrow: "Deep Cleaning",
-      title: "Detailed Deep Clean",
+      title: "Deep Cleaning",
       priceLabel: `From ${money0(deepStart)}`,
-      description:
-        "A dedicated deep-cleaning price based on property size, with extra attention to detailed surfaces and buildup.",
+      description: "More detailed cleaning for buildup, seasonal resets and a fuller home refresh.",
       features: [
-        "Detailed baseboards, door frames, doors and switches",
-        "Edges and corners with detailed bathroom attention",
-        "Dedicated Deep Cleaning room increments",
-        "Price increases according to the actual property size",
+        "Detailed kitchen cleaning",
+        "Detailed bathroom cleaning",
+        "Baseboards & door frames",
+        "Edges, corners & extra detail",
       ],
-      icon: <Sparkles className="h-7 w-7" />,
-      accentClass: "border-violet-200 bg-violet-50/70",
-      iconClass: "bg-violet-600 text-white",
+      note: "Room-based pricing with live updates",
+      icon: <Sparkles className="h-6 w-6" />,
+      accent: "text-sky-700",
+      soft: "bg-sky-50",
+      border: "border-sky-100",
     },
     {
       scope: "move_in_out",
-      eyebrow: "Move-In / Move-Out",
-      title: "Empty-Home Turnover Clean",
+      title: "Move-In / Move-Out",
       priceLabel: `From ${money0(moveStart)}`,
-      description:
-        "Designed for empty properties with size-based tiers and selected inside-appliance and cabinet cleaning already included.",
+      description: "Turnover cleaning for empty homes before or after a move, sale or tenant change.",
       features: [
-        "Baseboards, doors, frames, switches and accessible floors",
-        "Inside empty refrigerator and microwave included",
-        "Inside oven in normal condition included",
-        "Inside empty kitchen cabinets and drawers included",
+        "Empty-home turnover cleaning",
+        "Inside fridge, oven & microwave",
+        "Inside empty cabinets",
+        "Baseboards & accessible floors",
       ],
-      icon: <Building2 className="h-7 w-7" />,
-      accentClass: "border-cyan-200 bg-cyan-50/70",
-      iconClass: "bg-cyan-600 text-white",
+      note: "Best for empty properties",
+      icon: <Building2 className="h-6 w-6" />,
+      accent: "text-violet-700",
+      soft: "bg-violet-50",
+      border: "border-violet-100",
     },
     {
       scope: "carpet",
-      eyebrow: "Carpet Steam Cleaning",
-      title: "Standalone or Add-On Carpet Care",
+      title: "Carpet Cleaning",
       priceLabel: `${money0(carpetMinimum)} minimum`,
-      description:
-        "Select carpeted rooms and areas individually. Standalone carpet cleaning always respects the minimum service price.",
+      description: "Steam cleaning for selected carpeted rooms, hallways, stairs and smaller carpet areas.",
       features: [
         "Standard carpeted rooms",
-        "Living/larger rooms, hallways and carpeted stairs",
-        "Small area rugs and heavy stain treatment",
-        "Pet urine or odour treatment is sent for a custom quote",
+        "Living / larger rooms",
+        "Hallways & carpeted stairs",
+        "Rugs & stain treatment options",
       ],
-      icon: <Sofa className="h-7 w-7" />,
-      accentClass: "border-emerald-200 bg-emerald-50/70",
-      iconClass: "bg-emerald-600 text-white",
+      note: "Standalone or add-on service",
+      icon: <Sofa className="h-6 w-6" />,
+      accent: "text-cyan-700",
+      soft: "bg-cyan-50",
+      border: "border-cyan-100",
     },
   ];
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setHeroPreviewIndex((current) => (current + 1) % 4);
+    }, 2800);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const heroPreviewCards = serviceCards.map((card) => ({
+    scope: card.scope,
+    title: card.title,
+    priceLabel: card.priceLabel,
+    icon: card.icon,
+    accent: card.accent,
+    soft: card.soft,
+  }));
+
+  const activeMobileCard =
+    serviceCards.find((card) => card.scope === activeMobileCardScope) ?? serviceCards[0];
+
   const beginBooking = (scope: CleaningPricingScope) => {
     if (authLoading) return;
-
     const service = serviceByScope[scope];
     if (!service) return;
 
     setSelectedService(service);
-    setSelectedServiceTitle(
-      serviceCards.find((card) => card.scope === scope)?.eyebrow ?? service.title,
-    );
+    setSelectedServiceTitle(serviceCards.find((card) => card.scope === scope)?.title ?? service.title);
 
     if (!user) {
       setShowLoginPrompt(true);
@@ -240,264 +252,326 @@ const BookingClient = ({ services }: BookingClientProps) => {
   };
 
   const scrollToServices = () => {
-    document.getElementById("cleaning-services")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+    document.getElementById("cleaning-services")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 pb-24">
-      <section className="relative overflow-hidden border-b border-slate-200 bg-white px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
-        <motion.div
-          aria-hidden="true"
-          animate={{ x: [0, 18, 0], y: [0, 10, 0], scale: [1, 1.05, 1] }}
-          transition={{ duration: 11, repeat: Infinity, ease: "easeInOut" }}
-          className="pointer-events-none absolute -left-24 top-0 h-80 w-80 rounded-full bg-blue-100/70 blur-3xl"
-        />
-        <motion.div
-          aria-hidden="true"
-          animate={{ x: [0, -16, 0], y: [0, -8, 0], scale: [1, 1.04, 1] }}
-          transition={{ duration: 13, repeat: Infinity, ease: "easeInOut" }}
-          className="pointer-events-none absolute -right-20 bottom-0 h-80 w-80 rounded-full bg-cyan-100/70 blur-3xl"
-        />
+    <main className="min-h-screen overflow-x-hidden bg-[#f7fbfc] pb-20 text-slate-900">
+      {/* Hero */}
+      <section className="relative overflow-hidden border-b border-slate-200 bg-white px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-14">
+        <div className="pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full bg-teal-100/70 blur-3xl" />
+        <div className="pointer-events-none absolute -right-28 bottom-0 h-80 w-80 rounded-full bg-sky-100/70 blur-3xl" />
 
-        <div className="relative mx-auto max-w-5xl">
-          <motion.div
-            initial={{ opacity: 0, x: -24 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.6, ease: "easeOut" }}
-          >
-            <motion.h1
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.08 }}
-              className="max-w-4xl text-4xl font-black leading-[1.05] text-slate-950 sm:text-5xl lg:text-[3.45rem]"
-            >
-              Professional Home Cleaning From {money0(standardEssential)}
-            </motion.h1>
+        <div className="relative mx-auto grid max-w-6xl gap-10 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-teal-600">Professional home cleaning</p>
+            <h1 className="mt-3 max-w-3xl text-[2.35rem] font-black leading-[1.06] tracking-tight text-slate-950 sm:text-5xl lg:text-[3.65rem]">
+              A Cleaner Home for a Happier You
+            </h1>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
+              Reliable, detailed and transparent cleaning services with clear starting prices, included scope and a live total before you book.
+            </p>
 
-            <motion.p
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.16 }}
-              className="mt-5 max-w-3xl text-base leading-7 text-slate-600 sm:text-lg"
-            >
-              Our {money0(standardEssential)} Essential Standard Clean is a real package for 1 bedroom,
-              1 full bathroom, 1 kitchen and 1 living area. Customize your home and see the updated
-              price before you confirm.
-            </motion.p>
-
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.24 }}
-              className="mt-8 flex flex-col gap-3 sm:flex-row"
-            >
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
                 onClick={scrollToServices}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0B4E9B] px-6 py-3.5 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:-translate-y-0.5 hover:bg-[#073f7d] active:scale-[0.985]"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#08aebc] to-[#0d9ecf] px-6 text-sm font-black text-white shadow-lg shadow-cyan-200/70 transition hover:-translate-y-0.5"
               >
-                Choose a service
+                Book Your Cleaning
                 <ArrowRight className="h-4 w-4" />
               </button>
-
               <button
                 type="button"
                 onClick={() => setShowPricingPopup(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.985]"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-6 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
               >
-                <Info className="h-4 w-4 text-blue-600" />
+                <Info className="h-4 w-4 text-teal-600" />
                 How pricing works
               </button>
-            </motion.div>
+            </div>
+
+            <div className="mt-6 grid max-w-2xl grid-cols-3 gap-2 sm:gap-2.5">
+              {["Transparent pricing", "Customize your service", "Trusted & insured"].map((item, index) => (
+                <motion.div
+                  key={item}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.16 + index * 0.07 }}
+                  className="flex min-h-[72px] flex-col items-start justify-start gap-2 rounded-2xl border border-slate-200 bg-white/85 px-3 py-3 text-[10px] font-bold leading-4 text-slate-700 shadow-sm sm:min-h-0 sm:flex-row sm:items-center sm:px-3.5 sm:text-xs"
+                >
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-teal-600" />
+                  {item}
+                </motion.div>
+              ))}
+            </div>
           </motion.div>
 
+          {/* Animated service selector inspired by the approved UX mockup. */}
+          <motion.div
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.55, delay: 0.08 }}
+            className="relative mx-auto w-full max-w-[520px]"
+          >
+            <div className="absolute -inset-6 rounded-[2.5rem] bg-gradient-to-br from-teal-100 via-white to-violet-100 opacity-90 blur-2xl" />
+            <div className="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-white p-5 shadow-2xl shadow-slate-300/50 sm:p-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-teal-600">Choose your service</p>
+                  <h2 className="mt-1 text-xl font-black text-slate-950">Start with the clean you need</h2>
+                </div>
+                <span className="hidden rounded-full bg-slate-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-500 sm:inline-flex">4 services</span>
+              </div>
+
+              <div className="mt-5 space-y-2.5">
+                {heroPreviewCards.map((item, index) => {
+                  const active = index === heroPreviewIndex;
+                  return (
+                    <motion.button
+                      key={item.scope}
+                      type="button"
+                      initial={{ opacity: 0, x: 18 }}
+                      animate={{ opacity: 1, x: 0, scale: active ? 1.015 : 1 }}
+                      transition={{ duration: 0.35, delay: index * 0.07 }}
+                      onMouseEnter={() => setHeroPreviewIndex(index)}
+                      onFocus={() => setHeroPreviewIndex(index)}
+                      onClick={() => beginBooking(item.scope)}
+                      className={`relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border px-3.5 py-3 text-left transition-all duration-300 ${
+                        active
+                          ? "border-teal-300 bg-gradient-to-r from-teal-50 to-cyan-50 shadow-md shadow-teal-100/70"
+                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId="hero-service-active"
+                          className="absolute inset-y-0 left-0 w-1 rounded-r-full bg-teal-500"
+                          transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                        />
+                      )}
+                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${item.soft} ${item.accent}`}>
+                        {item.icon}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-black text-slate-900">{item.title}</span>
+                        <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">Tap to customize</span>
+                      </span>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-black ${active ? "bg-white text-teal-700 shadow-sm" : "bg-slate-50 text-slate-600"}`}>
+                        {item.priceLabel}
+                      </span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-teal-100 bg-gradient-to-r from-teal-50 to-cyan-50 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black text-slate-900">Customize only what you need</p>
+                    <p className="mt-0.5 text-[11px] leading-5 text-slate-500">Rooms, areas and optional add-ons update your live total before booking.</p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 shrink-0 text-teal-600" />
+                </div>
+              </div>
+
+            </div>
+          </motion.div>
         </div>
       </section>
 
-      <section className="relative z-10 -mt-2 px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.18 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="mx-auto max-w-6xl rounded-[2rem] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60 sm:p-7 lg:p-8"
-        >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
-                How your price is built
-              </span>
-              <h2 className="mt-2 text-[2rem] font-black leading-tight text-slate-950 sm:text-[2.5rem]">
-                Four simple steps from service to final total
-              </h2>
-            </div>
-            <p className="max-w-xl text-sm leading-6 text-slate-500">
-              Pick a plan, tailor it to your property and see every charge before you submit.
-            </p>
-          </div>
-
-          <div className="relative mt-8">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {[
-                {
-                  number: "01",
-                  title: "Select service",
-                  copy: "Pick the cleaning type that matches your home and the result you need.",
-                  icon: <Home className="h-5 w-5" />,
-                  tone: "bg-blue-50 text-blue-700",
-                },
-                {
-                  number: "02",
-                  title: "Customize property",
-                  copy: "Add bedrooms, bathrooms, extra areas and only the add-ons that apply.",
-                  icon: <Sparkles className="h-5 w-5" />,
-                  tone: "bg-violet-50 text-violet-700",
-                },
-                {
-                  number: "03",
-                  title: "See live total",
-                  copy: "Watch your subtotal and GST update instantly as you tailor the service.",
-                  icon: <ShieldCheck className="h-5 w-5" />,
-                  tone: "bg-emerald-50 text-emerald-700",
-                },
-                {
-                  number: "04",
-                  title: "Review & submit",
-                  copy: "Check every detail, make edits if needed, then send your booking request.",
-                  icon: <CheckCircle2 className="h-5 w-5" />,
-                  tone: "bg-amber-50 text-amber-700",
-                },
-              ].map((step, index, arr) => (
-                <div key={step.number} className="relative">
-                  <motion.article
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, amount: 0.25 }}
-                    transition={{ duration: 0.4, delay: index * 0.06 }}
-                    whileHover={{ y: -4 }}
-                    className="relative h-full rounded-[1.45rem] border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl ${step.tone}`}>
-                        {step.icon}
-                      </div>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-black tracking-[0.16em] text-slate-500">
-                        {step.number}
-                      </span>
-                    </div>
-                    <h3 className="mt-6 text-[1.6rem] font-black leading-tight text-slate-900">{step.title}</h3>
-                    <p className="mt-3 text-[15px] leading-7 text-slate-600">{step.copy}</p>
-                  </motion.article>
-
-                  {index < arr.length - 1 && (
-                    <motion.div
-                      aria-hidden="true"
-                      animate={{ x: [0, 4, 0] }}
-                      transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut", delay: index * 0.12 }}
-                      className="pointer-events-none absolute -right-2 top-1/2 z-10 hidden -translate-y-1/2 xl:flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm"
-                    >
-                      <ArrowRight className="h-4 w-4" />
-                    </motion.div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </motion.div>
+      {/* Three core UX promises from the supplied guide. */}
+      <section className="px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-4 md:grid-cols-3">
+          {[
+            { icon: <CheckCircle2 className="h-5 w-5" />, title: "Clear pricing", copy: "Starting prices and live calculation shown clearly." },
+            { icon: <Sparkles className="h-5 w-5" />, title: "Easy customization", copy: "Choose only the rooms, areas and add-ons you need." },
+            { icon: <ShieldCheck className="h-5 w-5" />, title: "Trust through transparency", copy: "See what is included and not included before booking." },
+          ].map((item, index) => (
+            <motion.div
+              key={item.title}
+              initial={{ opacity: 0, y: 18 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.4 }}
+              transition={{ delay: index * 0.06 }}
+              className={`rounded-[1.6rem] border border-slate-200 bg-white p-5 shadow-sm ${index === 2 ? "col-span-2 md:col-span-1" : ""}`}
+            >
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-600">{item.icon}</div>
+              <h3 className="mt-4 text-lg font-black text-slate-950">{item.title}</h3>
+              <p className="mt-1.5 text-sm leading-6 text-slate-500">{item.copy}</p>
+            </motion.div>
+          ))}
+        </div>
       </section>
 
-      <section id="cleaning-services" className="scroll-mt-24 px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
+      {/* Service overview */}
+      <section id="cleaning-services" className="scroll-mt-24 px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
         <div className="mx-auto max-w-6xl">
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.5 }}
-            transition={{ duration: 0.45 }}
-            className="mx-auto max-w-3xl text-center"
-          >
-            <span className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
-              Step 1 — Select Cleaning Service
-            </span>
-            <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl">
-              Choose the service that matches your property
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              Starting prices are shown with their real included scope. Your total updates when you
-              select additional rooms, services or carpet areas.
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-xs font-black uppercase tracking-[0.22em] text-teal-600">Our cleaning services</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Choose the service that fits your home</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
+              Clear starting prices, included scope and relevant add-ons before you begin customizing.
             </p>
-          </motion.div>
+          </div>
 
-          <div className="mx-auto mt-10 grid max-w-4xl gap-5 lg:grid-cols-2">
+          <div className="mt-9 hidden gap-5 lg:grid lg:grid-cols-2 xl:grid-cols-4">
             {serviceCards.map((card, index) => {
               const available = Boolean(serviceByScope[card.scope]);
-
               return (
                 <motion.article
                   key={card.scope}
-                  initial={{ opacity: 0, y: 18 }}
+                  initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, amount: 0.2 }}
                   transition={{ duration: 0.4, delay: index * 0.06 }}
                   whileHover={{ y: -5 }}
-                  className={`group relative flex h-full flex-col rounded-[1.4rem] border p-5 shadow-sm transition-shadow hover:shadow-xl sm:p-6 ${card.accentClass}`}
+                  className={`flex h-full flex-col overflow-hidden rounded-[1.55rem] border ${card.border} bg-white shadow-sm transition-shadow hover:shadow-xl`}
                 >
-                  <div className="mb-5 flex items-start justify-between gap-4">
-                    <div className={`flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm ${card.iconClass}`}>
-                      {card.icon}
+                  <div className={`${card.soft} flex h-[288px] flex-col p-5`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm ${card.accent}`}>{card.icon}</div>
+                      <span className={`rounded-full bg-white px-3 py-1.5 text-xs font-black shadow-sm ${card.accent}`}>{card.priceLabel}</span>
                     </div>
-                    {card.badge && (
-                      <span className="rounded-full border border-blue-100 bg-white/80 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-700 shadow-sm">
-                        {card.badge}
-                      </span>
-                    )}
+                    <h3 className="mt-5 min-h-[58px] text-xl font-black leading-tight text-slate-950">{card.title}</h3>
+                    <p className="mt-2 min-h-[104px] text-sm leading-6 text-slate-600">{card.description}</p>
                   </div>
 
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="pr-2">
-                      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                        {card.eyebrow}
-                      </p>
-                      <h3 className="mt-1 text-xl font-black leading-tight text-slate-900 sm:text-[1.35rem]">
-                        {card.title}
-                      </h3>
+                  <div className="flex min-h-[350px] flex-1 flex-col p-5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Included highlights</p>
+                    <ul className="mt-3 space-y-2.5">
+                      {card.features.map((feature) => (
+                        <li key={feature} className="flex gap-2.5 text-sm leading-5 text-slate-700">
+                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600"><Check className="h-3.5 w-3.5" /></span>
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <div className="mt-auto pt-5">
+                      <div className="border-t border-slate-100 pt-4 text-xs font-bold text-slate-500">{card.note}</div>
+                      <button
+                        type="button"
+                        onClick={() => beginBooking(card.scope)}
+                        disabled={!available || authLoading}
+                        className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#08aebc] px-4 text-sm font-black text-white transition hover:bg-[#078f9b] disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {available ? "Customize your clean" : "Service unavailable"}
+                        {available && <ArrowRight className="h-4 w-4 shrink-0" />}
+                      </button>
                     </div>
-                    <span className="w-fit shrink-0 rounded-full bg-white px-4 py-2 text-sm font-black text-[#073f7d] shadow-sm">
-                      {card.priceLabel}
-                    </span>
-                  </div>
-
-                  <p className="mt-4 leading-7 text-slate-600">{card.description}</p>
-
-                  <ul className="mt-5 space-y-3">
-                    {card.features.map((feature) => (
-                      <li key={feature} className="flex gap-3 text-sm leading-6 text-slate-700">
-                        <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-blue-600" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div className="mt-auto pt-7">
-                    <button
-                      type="button"
-                      onClick={() => beginBooking(card.scope)}
-                      disabled={!available || authLoading}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4E9B] px-5 py-3.5 text-sm font-black text-white shadow-sm transition hover:bg-[#073f7d] active:scale-[0.985] disabled:cursor-not-allowed disabled:bg-slate-300"
-                    >
-                      {available ? "Customize & see price" : "Service unavailable"}
-                      {available && <ArrowRight className="h-4 w-4" />}
-                    </button>
                   </div>
                 </motion.article>
               );
             })}
           </div>
+
+          <div className="mt-7 lg:hidden">
+            <div className="grid grid-cols-2 gap-4">
+              {serviceCards.map((card, index) => {
+                const available = Boolean(serviceByScope[card.scope]);
+                const active = activeMobileCardScope === card.scope;
+                return (
+                  <motion.button
+                    key={card.scope}
+                    type="button"
+                    initial={{ opacity: 0, y: 16 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.2 }}
+                    transition={{ duration: 0.35, delay: index * 0.05 }}
+                    onClick={() => setActiveMobileCardScope(card.scope)}
+                    className={`overflow-hidden rounded-[1.45rem] border text-left shadow-sm transition-all ${
+                      active ? `${card.border} ring-2 ring-teal-200` : "border-slate-200"
+                    } bg-white`}
+                  >
+                    <div className={`${card.soft} flex h-full min-h-[250px] flex-col p-4`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-2xl bg-white shadow-sm ${card.accent}`}>{card.icon}</div>
+                        <span className={`rounded-full bg-white px-2.5 py-1 text-[10px] font-black shadow-sm ${card.accent}`}>{card.priceLabel}</span>
+                      </div>
+                      <h3 className="mt-4 min-h-[50px] text-[1.05rem] font-black leading-tight text-slate-950">{card.title}</h3>
+                      <p className="mt-2 text-[13px] leading-5 text-slate-600">{card.description}</p>
+                      <div className="mt-auto pt-4">
+                        <span className="inline-flex min-h-9 items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-3.5 py-2 text-[11px] font-extrabold tracking-[0.01em] text-blue-700 shadow-sm">
+                          Tap to view details
+                        </span>
+                      </div>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+
+            <motion.div
+              key={activeMobileCard.scope}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.28 }}
+              className={`mt-5 overflow-hidden rounded-[1.55rem] border ${activeMobileCard.border} bg-white shadow-sm`}
+            >
+              <div className={`${activeMobileCard.soft} p-5`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-teal-600">Selected service</p>
+                    <h3 className="mt-2 text-2xl font-black leading-tight text-slate-950">{activeMobileCard.title}</h3>
+                  </div>
+                  <span className={`rounded-full bg-white px-3 py-1.5 text-xs font-black shadow-sm ${activeMobileCard.accent}`}>{activeMobileCard.priceLabel}</span>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-600">{activeMobileCard.description}</p>
+              </div>
+              <div className="p-5">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Included highlights</p>
+                <ul className="mt-3 space-y-2.5">
+                  {activeMobileCard.features.map((feature) => (
+                    <li key={feature} className="flex gap-2.5 text-sm leading-5 text-slate-700">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-600"><Check className="h-3.5 w-3.5" /></span>
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs font-bold leading-5 text-slate-500">{activeMobileCard.note}</div>
+                <button
+                  type="button"
+                  onClick={() => beginBooking(activeMobileCard.scope)}
+                  disabled={!serviceByScope[activeMobileCard.scope] || authLoading}
+                  className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-[#08aebc] px-4 text-sm font-black text-white transition hover:bg-[#078f9b] disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {serviceByScope[activeMobileCard.scope] ? "Customize your clean" : "Service unavailable"}
+                  {serviceByScope[activeMobileCard.scope] && <ArrowRight className="h-4 w-4 shrink-0" />}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         </div>
       </section>
 
+      {/* Simple flow bar matching the guide's recommended journey. */}
+      <section className="px-4 pb-12 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-6xl overflow-hidden rounded-[1.75rem] border border-teal-100 bg-white shadow-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4">
+            {[
+              { icon: <Home className="h-5 w-5" />, title: "Select your service", copy: "Choose the right cleaning type" },
+              { icon: <Sparkles className="h-5 w-5" />, title: "Customize your clean", copy: "Rooms, areas and add-ons" },
+              { icon: <CalendarDays className="h-5 w-5" />, title: "Book in minutes", copy: "Date, time and location" },
+              { icon: <CheckCircle2 className="h-5 w-5" />, title: "Review & confirm", copy: "See scope, GST and total" },
+            ].map((item, index) => {
+              const mobileBorder = index < 2 ? "border-b border-slate-100" : "";
+              const mobileColumnBorder = index % 2 === 0 ? "border-r border-slate-100" : "";
+              const desktopBorder = index < 3 ? "md:border-b-0 md:border-r md:border-slate-100" : "";
+              return (
+                <div key={item.title} className={`relative min-h-[168px] p-5 ${mobileBorder} ${mobileColumnBorder} ${desktopBorder}`}>
+                  <div className="flex h-full flex-col items-start justify-start">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600">{item.icon}</div>
+                    <p className="mt-3 text-sm font-black leading-5 text-slate-900">{item.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{item.copy}</p>
+                  </div>
+                  {index < 3 && <ArrowRight className="absolute right-[-10px] top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-white text-slate-300 md:block" />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
 
       <AnimatePresence>
         {showPricingPopup && (
@@ -505,47 +579,26 @@ const BookingClient = ({ services }: BookingClientProps) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 px-4"
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm"
             onClick={() => setShowPricingPopup(false)}
           >
             <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.96 }}
+              initial={{ opacity: 0, y: 18, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ duration: 0.2 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
               className="relative w-full max-w-lg rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-2xl sm:p-7"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
             >
-              <button
-                type="button"
-                onClick={() => setShowPricingPopup(false)}
-                className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800"
-                aria-label="Close pricing info"
-              >
+              <button type="button" onClick={() => setShowPricingPopup(false)} className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200" aria-label="Close pricing information">
                 <X className="h-4 w-4" />
               </button>
-
-              <div className="pr-10">
-                <span className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">
-                  Pricing information
-                </span>
-                <h3 className="mt-2 text-2xl font-black text-slate-900">How pricing works</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-600">
-                  Each cleaning service has its own plan and included scope. Optional add-ons are charged separately only when you select them.
-                </p>
-              </div>
-
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-teal-600">Pricing information</p>
+              <h3 className="mt-2 text-2xl font-black text-slate-950">Clear pricing before you book</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-600">Each service has its own included scope. Extra rooms and optional add-ons are only charged when they apply to your selection.</p>
               <div className="mt-6 space-y-3">
-                {[
-                  "Live pricing updates as you customize your booking",
-                  "Applicable GST is shown before confirmation",
-                  "Optional add-ons are charged only when selected",
-                  "Included services are not charged twice",
-                ].map((item) => (
-                  <div key={item} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-blue-100">
-                      <CheckCircle2 className="h-4 w-4 text-blue-600" />
-                    </div>
+                {["Live subtotal updates while you customize", "Applicable GST is shown before confirmation", "Only relevant add-ons are displayed", "Included services are protected from duplicate charges"].map((item) => (
+                  <div key={item} className="flex items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-teal-600" />
                     <span className="text-sm font-semibold leading-6 text-slate-700">{item}</span>
                   </div>
                 ))}
@@ -581,26 +634,14 @@ const BookingClient = ({ services }: BookingClientProps) => {
               onClick={(event) => event.stopPropagation()}
               className="relative w-full max-w-md rounded-3xl bg-white p-7 shadow-2xl sm:p-8"
             >
-              <button
-                type="button"
-                onClick={() => setShowLoginPrompt(false)}
-                className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                aria-label="Close"
-              >
+              <button type="button" onClick={() => setShowLoginPrompt(false)} className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200" aria-label="Close">
                 <X className="h-4 w-4" />
               </button>
-
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-                <Lock className="h-7 w-7" />
-              </div>
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-teal-50 text-teal-600"><Lock className="h-7 w-7" /></div>
               <div className="mt-5 text-center">
                 <h2 className="text-2xl font-black text-slate-900">Continue your booking</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Customize <span className="font-bold text-blue-700">{selectedServiceTitle}</span> as
-                  a guest, or log in to keep the booking in your account.
-                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">Customize <span className="font-bold text-teal-700">{selectedServiceTitle}</span> as a guest, or log in to keep the booking in your account.</p>
               </div>
-
               <div className="mt-7 space-y-3">
                 <button
                   type="button"
@@ -609,10 +650,9 @@ const BookingClient = ({ services }: BookingClientProps) => {
                     setIsGuestBooking(true);
                     setIsModalOpen(true);
                   }}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4E9B] py-3.5 text-sm font-black text-white transition hover:bg-[#073f7d]"
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-[#08aebc] py-3.5 text-sm font-black text-white hover:bg-[#078f9b]"
                 >
-                  Continue as Guest
-                  <ArrowRight className="h-4 w-4" />
+                  Continue as Guest <ArrowRight className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
@@ -620,17 +660,11 @@ const BookingClient = ({ services }: BookingClientProps) => {
                     setShowLoginPrompt(false);
                     router.push("/login?redirect=/booking");
                   }}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-3.5 text-sm font-black text-slate-700 transition hover:bg-slate-50"
+                  className="flex w-full items-center justify-center rounded-full border border-slate-200 bg-white py-3.5 text-sm font-black text-slate-700 hover:bg-slate-50"
                 >
                   Log in to continue
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowLoginPrompt(false)}
-                  className="w-full py-2 text-sm font-bold text-slate-400 hover:text-slate-600"
-                >
-                  Cancel
-                </button>
+                <button type="button" onClick={() => setShowLoginPrompt(false)} className="w-full py-2 text-sm font-bold text-slate-400 hover:text-slate-600">Cancel</button>
               </div>
             </motion.div>
           </motion.div>
