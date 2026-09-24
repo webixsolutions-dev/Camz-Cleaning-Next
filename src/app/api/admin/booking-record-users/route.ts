@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
-type BaseRole = "admin" | "cleaner" | "data_entry";
+type BaseRole = "admin" | "accountant" | "cleaner" | "data_entry";
 
 type UserPayload = {
   id?: string;
@@ -30,7 +30,7 @@ type RoleDefinition = {
   is_system: boolean;
 };
 
-const BASE_ROLES = new Set<BaseRole>(["admin", "cleaner", "data_entry"]);
+const BASE_ROLES = new Set<BaseRole>(["admin", "accountant", "cleaner", "data_entry"]);
 const APPROVAL_STATUSES = new Set(["approved", "pending", "rejected"]);
 
 async function getAdminActor(): Promise<{ id: string } | null> {
@@ -80,6 +80,7 @@ function missingAdminKey() {
 
 function builtInRoleName(role: BaseRole) {
   if (role === "admin") return "Admin";
+  if (role === "accountant") return "Accountant";
   if (role === "data_entry") return "Data Entry";
   return "Cleaner";
 }
@@ -93,12 +94,12 @@ async function resolveRole(
     .trim()
     .toLowerCase();
 
-  // Admin is a built-in application role and does not need a booking_roles row.
-  if (roleKey === "admin") {
+  // Admin and Accountant are built-in application roles and do not need booking_roles rows.
+  if (roleKey === "admin" || roleKey === "accountant") {
     return {
-      key: "admin",
-      name: "Admin",
-      base_role: "admin",
+      key: roleKey,
+      name: builtInRoleName(roleKey as BaseRole),
+      base_role: roleKey as BaseRole,
       is_system: true,
     };
   }
@@ -195,7 +196,7 @@ export async function POST(request: NextRequest) {
     phone_number: phone,
     phone,
     role: baseRole,
-    booking_role_key: baseRole === "admin" ? null : roleDef.key,
+    booking_role_key: baseRole === "admin" || baseRole === "accountant" ? null : roleDef.key,
     booking_role_name: roleDef.name,
     source,
     approval_status: approvalStatus,
@@ -205,6 +206,7 @@ export async function POST(request: NextRequest) {
     offering_hourly:
       baseRole === "cleaner" ? Boolean(body.offering_hourly) : false,
     hourly_rate: baseRole === "cleaner" ? body.hourly_rate || "0" : "0",
+    invoice_access: baseRole === "accountant",
   };
 
   const { data: authData, error: authError } =
@@ -228,7 +230,7 @@ export async function POST(request: NextRequest) {
     email,
     phone_number: phone,
     role: baseRole,
-    booking_role_key: baseRole === "admin" ? null : roleDef.key,
+    booking_role_key: baseRole === "admin" || baseRole === "accountant" ? null : roleDef.key,
     approval_status: approvalStatus,
     source,
     is_blocked: false,
@@ -241,6 +243,7 @@ export async function POST(request: NextRequest) {
     offering_hourly:
       baseRole === "cleaner" ? Boolean(body.offering_hourly) : false,
     hourly_rate: baseRole === "cleaner" ? body.hourly_rate || "0" : "0",
+    invoice_access: baseRole === "accountant",
   };
 
   const { error: profileError } = await admin
@@ -274,7 +277,7 @@ export async function PATCH(request: NextRequest) {
   const { data: existing, error: existingError } = await admin
     .from("users")
     .select(
-      "id, name, email, phone_number, role, booking_role_key, approval_status, source, is_blocked, is_available, offering_fixed, offering_hourly, hourly_rate",
+      "id, name, email, phone_number, role, booking_role_key, approval_status, source, is_blocked, is_available, offering_fixed, offering_hourly, hourly_rate, invoice_access",
     )
     .eq("id", body.id)
     .maybeSingle();
@@ -360,7 +363,7 @@ export async function PATCH(request: NextRequest) {
     email,
     phone_number: phone,
     role: baseRole,
-    booking_role_key: baseRole === "admin" ? null : roleDef.key,
+    booking_role_key: baseRole === "admin" || baseRole === "accountant" ? null : roleDef.key,
     approval_status: approvalStatus,
     source,
     is_blocked:
@@ -389,6 +392,12 @@ export async function PATCH(request: NextRequest) {
       baseRole === "cleaner"
         ? body.hourly_rate ?? String(existing.hourly_rate ?? "0")
         : "0",
+    invoice_access:
+      baseRole === "accountant"
+        ? true
+        : baseRole === "data_entry"
+          ? Boolean(existing.invoice_access)
+          : false,
   };
 
   const authChanges: {
@@ -402,10 +411,11 @@ export async function PATCH(request: NextRequest) {
       phone_number: phone,
       phone,
       role: baseRole,
-      booking_role_key: baseRole === "admin" ? null : roleDef.key,
+      booking_role_key: baseRole === "admin" || baseRole === "accountant" ? null : roleDef.key,
       booking_role_name: roleDef.name,
       approval_status: approvalStatus,
       source,
+      invoice_access: baseRole === "accountant" ? true : baseRole === "data_entry" ? Boolean(existing.invoice_access) : false,
     },
   };
 
@@ -499,7 +509,7 @@ export async function DELETE(request: NextRequest) {
 
   if (!BASE_ROLES.has(targetRole)) {
     return NextResponse.json(
-      { error: "Only Admin, Cleaner, or Data Entry users can be deleted here." },
+      { error: "Only Admin, Accountant, Cleaner, or Data Entry users can be deleted here." },
       { status: 400 },
     );
   }

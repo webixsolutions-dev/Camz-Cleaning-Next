@@ -43,6 +43,7 @@ type Invoice = {
   service_address_id: string | null;
   invoice_date: string | null;
   service_date: string | null;
+  service_type?: string | null;
   due_date: string | null;
   notes: string | null;
   discount_type: InvoiceDiscountType;
@@ -173,6 +174,7 @@ export default function CrmInvoiceEditor({
   const [serviceAddressId, setServiceAddressId] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(today());
   const [serviceDate, setServiceDate] = useState("");
+  const [serviceType, setServiceType] = useState("");
   const [dueDate, setDueDate] = useState(today());
   const [notes, setNotes] = useState("");
   const [discountType, setDiscountType] = useState<InvoiceDiscountType>("none");
@@ -259,24 +261,22 @@ export default function CrmInvoiceEditor({
 
   const load = async (id?: string) => {
     try {
-      const [customersRes, settingsRes, invoiceRes] = await Promise.all([
-        fetch("/api/admin/crm/customers/", { cache: "no-store" }),
-        fetch("/api/admin/crm/settings/", { cache: "no-store" }),
+      const [bootstrapRes, invoiceRes] = await Promise.all([
+        fetch("/api/admin/crm/invoices/bootstrap/", { cache: "no-store" }),
         id ? fetch(`/api/admin/crm/invoices/?id=${id}`, { cache: "no-store" }) : Promise.resolve(null),
       ]);
-      const customersPayload = await readApi(customersRes);
-      if (!customersRes.ok) {
-        setError(String(customersPayload.error || "Failed to load customers"));
+      const bootstrapPayload = await readApi(bootstrapRes);
+      if (!bootstrapRes.ok) {
+        setError(String(bootstrapPayload.error || "Failed to load invoice setup"));
         return;
       }
-      const loadedCustomers = (customersPayload.customers as CrmCustomer[]) || [];
+      const loadedCustomers = (bootstrapPayload.customers as CrmCustomer[]) || [];
       setCustomers(loadedCustomers);
       if (!id && initialCustomerId && loadedCustomers.some((row) => row.id === initialCustomerId)) {
         chooseCustomer(initialCustomerId, loadedCustomers);
       }
-      const settingsPayload = await readApi(settingsRes);
-      if (settingsRes.ok) {
-        const nextSettings = (settingsPayload.settings || {}) as CrmSettings;
+      {
+        const nextSettings = (bootstrapPayload.settings || {}) as CrmSettings;
         setSettings(nextSettings);
         if (!id) {
           const nextInvoiceDate = today();
@@ -318,6 +318,7 @@ export default function CrmInvoiceEditor({
         }
         setInvoiceDate(current.invoice_date || today());
         setServiceDate(current.service_date || "");
+        setServiceType(current.service_type || "");
         setDueDate(current.due_date || "");
         setNotes(current.notes || "");
         setDiscountType(current.discount_type || "none");
@@ -356,6 +357,7 @@ export default function CrmInvoiceEditor({
           service_address_id: current.service_address_id || null,
           invoice_date: current.invoice_date || today(),
           service_date: current.service_date || null,
+          service_type: current.service_type || null,
           due_date: current.due_date || null,
           notes: current.notes || "",
           discount_type: current.discount_type || "none",
@@ -412,6 +414,7 @@ export default function CrmInvoiceEditor({
         service_address_id: serviceAddressId || null,
         invoice_date: invoiceDate,
         service_date: serviceDate || null,
+        service_type: serviceType.trim() || null,
         due_date: dueDate || null,
         notes,
         discount_type: discountType,
@@ -725,6 +728,7 @@ export default function CrmInvoiceEditor({
         service_address_id: serviceAddressId || null,
         invoice_date: invoiceDate,
         service_date: serviceDate || null,
+        service_type: serviceType.trim() || null,
         due_date: dueDate || null,
         notes,
         discount_type: discountType,
@@ -743,7 +747,7 @@ export default function CrmInvoiceEditor({
           taxable: line.taxable,
         })),
       }),
-    [billingAddressId, customerId, discountReason, discountType, discountValue, dueDate, invoiceDate, lines, notes, serviceAddressId, serviceDate, showDiscountReason, taxEnabled, taxRatePercent],
+    [billingAddressId, customerId, discountReason, discountType, discountValue, dueDate, invoiceDate, lines, notes, serviceAddressId, serviceDate, serviceType, showDiscountReason, taxEnabled, taxRatePercent],
   );
 
   useEffect(() => {
@@ -841,19 +845,21 @@ export default function CrmInvoiceEditor({
                         autoFocus
                         className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#4A86F7] focus:bg-white focus:ring-2 focus:ring-[#4A86F7]/10"
                       />
-                      <button
-                        type="button"
-                        className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[#4A86F7] px-3 text-[12px] font-bold text-white transition hover:bg-[#3675e7]"
-                        onClick={() => {
-                          setCustomerMenuOpen(false);
-                          setCustomerSearch("");
-                          const returnTo = window.location.pathname;
-                          router.push(`/admin-dashboard/crm/customers?new=1&returnTo=${encodeURIComponent(returnTo)}`);
-                        }}
-                      >
-                        <Plus size={14} />
-                        Add new customer
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[#4A86F7] px-3 text-[12px] font-bold text-white transition hover:bg-[#3675e7]"
+                          onClick={() => {
+                            setCustomerMenuOpen(false);
+                            setCustomerSearch("");
+                            const returnTo = window.location.pathname;
+                            router.push(`/admin-dashboard/crm/customers?new=1&returnTo=${encodeURIComponent(returnTo)}`);
+                          }}
+                        >
+                          <Plus size={14} />
+                          Add new customer
+                        </button>
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -907,7 +913,7 @@ export default function CrmInvoiceEditor({
               </label>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Service date
                 <input className={`${fieldClass} mt-1.5`} type="date" value={serviceDate} disabled={!draft} onChange={(event) => setServiceDate(event.target.value)} />
@@ -915,6 +921,16 @@ export default function CrmInvoiceEditor({
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 Due date
                 <input className={`${fieldClass} mt-1.5`} type="date" min={invoiceDate} value={dueDate} disabled={!draft} onChange={(event) => setDueDate(event.target.value)} />
+              </label>
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Service type
+                <input
+                  className={`${fieldClass} mt-1.5`}
+                  value={serviceType}
+                  disabled={!draft}
+                  onChange={(event) => setServiceType(event.target.value)}
+                  placeholder="e.g. Deep Cleaning"
+                />
               </label>
             </div>
 

@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   UserCheck,
   Users,
+  Trash2,
 } from "lucide-react";
 import CreateUserModal from "@/components/admin/users/CreateUserModal";
 import { labelRole } from "@/components/admin/users/userUiHelpers";
@@ -27,9 +28,10 @@ export type AdminUserRecord = {
   is_available: boolean | null;
   is_working: boolean | null;
   created_at: string;
+  invoice_access: boolean | null;
 };
 
-const roles = ["cleaner", "data_entry", "customer", "admin"];
+const roles = ["cleaner", "data_entry", "accountant", "customer", "admin"];
 
 export default function UserManagement({
   users = [],
@@ -92,6 +94,45 @@ export default function UserManagement({
     router.refresh();
   };
 
+  const removeUser = async (user: AdminUserRecord) => {
+    const confirmed = window.confirm(
+      `Remove ${user.name} (${user.email})? This permanently removes the login account.`,
+    );
+    if (!confirmed) return;
+
+    const response = await fetch(`/api/admin/users?id=${encodeURIComponent(user.id)}`, {
+      method: "DELETE",
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      window.alert(result.error || "Unable to remove user.");
+      return;
+    }
+
+    router.refresh();
+  };
+
+  const toggleInvoiceAccess = async (user: AdminUserRecord) => {
+    if (user.role !== "data_entry") return;
+
+    const response = await fetch("/api/admin/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: user.id,
+        invoice_access: !user.invoice_access,
+      }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      window.alert(result.error || "Unable to update invoice access.");
+      return;
+    }
+
+    router.refresh();
+  };
+
   return (
     <div className="min-h-screen bg-[#F4F7FB] px-4 py-4 text-slate-900 sm:px-5 lg:px-6">
       <div className="mx-auto max-w-[1500px]">
@@ -133,7 +174,7 @@ export default function UserManagement({
         )}
 
         {/* STATS */}
-        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {counts.map((item) => (
             <div
               key={item.role}
@@ -229,10 +270,11 @@ export default function UserManagement({
               <thead className="bg-[#F8FAFD]">
                 <tr>
                   {[
-                    ["User", "w-[22%]"],
-                    ["Contact", "w-[20%]"],
-                    ["Role", "w-[11%]"],
-                    ["Approval", "w-[12%]"],
+                    ["User", "w-[20%]"],
+                    ["Contact", "w-[18%]"],
+                    ["Role", "w-[10%]"],
+                    ["Invoice", "w-[10%]"],
+                    ["Approval", "w-[11%]"],
                     ["Source", "w-[9%]"],
                     ["Activity", "w-[9%]"],
                     ["Joined", "w-[10%]"],
@@ -289,6 +331,10 @@ export default function UserManagement({
                     </td>
 
                     <td className="px-2 py-2.5">
+                      <InvoiceAccessControl user={user} onToggle={() => void toggleInvoiceAccess(user)} />
+                    </td>
+
+                    <td className="px-2 py-2.5">
                       <StatusBadge
                         blocked={user.is_blocked}
                         status={user.approval_status}
@@ -312,21 +358,28 @@ export default function UserManagement({
                     </td>
 
                     <td className="px-1.5 py-2.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          toggleBlocked(user)
-                        }
-                        className={`h-7 whitespace-nowrap rounded-md px-2 text-[7px] font-bold transition ${
-                          user.is_blocked
-                            ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                            : "bg-rose-50 text-rose-700 hover:bg-rose-100"
-                        }`}
-                      >
-                        {user.is_blocked
-                          ? "Unblock"
-                          : "Block"}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleBlocked(user)}
+                          className={`h-7 whitespace-nowrap rounded-md px-2 text-[7px] font-bold transition ${
+                            user.is_blocked
+                              ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "bg-rose-50 text-rose-700 hover:bg-rose-100"
+                          }`}
+                        >
+                          {user.is_blocked ? "Unblock" : "Block"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeUser(user)}
+                          title="Remove user"
+                          aria-label={`Remove ${user.name}`}
+                          className="flex h-7 w-7 items-center justify-center rounded-md bg-rose-50 text-rose-700 transition hover:bg-rose-100"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -371,6 +424,11 @@ export default function UserManagement({
                   />
 
                   <MobileField
+                    label="Invoice"
+                    value={invoiceAccessText(user)}
+                  />
+
+                  <MobileField
                     label="Joined"
                     value={formatDate(
                       user.created_at,
@@ -388,20 +446,34 @@ export default function UserManagement({
                   />
                 </div>
 
+                {user.role === "data_entry" ? (
+                  <button
+                    type="button"
+                    onClick={() => void toggleInvoiceAccess(user)}
+                    className={`mt-3 mr-2 h-8 rounded-lg px-3 text-[9px] font-bold ${user.invoice_access ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}
+                  >
+                    {user.invoice_access ? "Disable Invoice" : "Enable Invoice"}
+                  </button>
+                ) : null}
+
                 <button
                   type="button"
-                  onClick={() =>
-                    toggleBlocked(user)
-                  }
+                  onClick={() => toggleBlocked(user)}
                   className={`mt-3 h-8 rounded-lg px-3 text-[9px] font-bold ${
                     user.is_blocked
                       ? "bg-emerald-50 text-emerald-700"
                       : "bg-rose-50 text-rose-700"
                   }`}
                 >
-                  {user.is_blocked
-                    ? "Unblock User"
-                    : "Block User"}
+                  {user.is_blocked ? "Unblock User" : "Block User"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void removeUser(user)}
+                  className="mt-3 ml-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-rose-600 px-3 text-[9px] font-bold text-white"
+                >
+                  <Trash2 size={12} />
+                  Remove User
                 </button>
               </article>
             ))}
@@ -447,6 +519,46 @@ function RoleBadge({
       className={`inline-flex rounded-md border px-2 py-1 text-[7px] font-extrabold uppercase tracking-[0.03em] ${tone}`}
     >
       {labelRole(role)}
+    </span>
+  );
+}
+
+function invoiceAccessText(user: AdminUserRecord) {
+  if (user.role === "admin" || user.role === "accountant") return "Full";
+  if (user.role === "data_entry") return user.invoice_access ? "Enabled" : "Disabled";
+  return "No access";
+}
+
+function InvoiceAccessControl({
+  user,
+  onToggle,
+}: {
+  user: AdminUserRecord;
+  onToggle: () => void;
+}) {
+  if (user.role === "data_entry") {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`h-7 whitespace-nowrap rounded-md px-2 text-[7px] font-bold transition ${
+          user.invoice_access
+            ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+            : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+        }`}
+      >
+        {user.invoice_access ? "Enabled" : "Enable"}
+      </button>
+    );
+  }
+
+  return (
+    <span className={`inline-flex rounded-md px-2 py-1 text-[7px] font-bold ${
+      user.role === "admin" || user.role === "accountant"
+        ? "bg-emerald-50 text-emerald-700"
+        : "bg-slate-100 text-slate-500"
+    }`}>
+      {invoiceAccessText(user)}
     </span>
   );
 }

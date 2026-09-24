@@ -1,9 +1,9 @@
 import { renderImmutableInvoicePdf } from "@/lib/crm/services/pdf";
-import { getCrmActor } from "@/lib/crm/staff";
+import { getInvoiceActor } from "@/lib/crm/staff";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
@@ -15,11 +15,18 @@ export async function GET(request: NextRequest) {
       supabase,
       invoiceId: id,
       actorId: actor.userId,
-      logAsset: download,
+      logAsset: true,
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+
+    await supabase.from("crm_invoice_events").insert({
+      invoice_id: id,
+      event_type: "pdf_generated",
+      payload: { filename: result.filename, download },
+      created_by: actor.userId,
+    });
 
     if (download) {
       const bytes = new Uint8Array(result.pdfBytes);

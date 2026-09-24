@@ -21,7 +21,7 @@ export type CleanerUser = {
 export type BookingRoleDefinition = {
   key: string;
   name: string;
-  base_role: "admin" | "cleaner" | "data_entry";
+  base_role: "admin" | "accountant" | "cleaner" | "data_entry";
   is_system: boolean;
   can_access_crm?: boolean;
   created_at?: string | null;
@@ -1942,7 +1942,7 @@ type UserEditorState = {
   email: string;
   phone_number: string;
   password: string;
-  role: "admin" | "cleaner" | "data_entry";
+  role: "admin" | "accountant" | "cleaner" | "data_entry";
   role_key: string;
   approval_status: string;
   source: string;
@@ -1969,7 +1969,7 @@ const emptyUserEditor: UserEditorState = {
   hourly_rate: "0",
 };
 
-const operationalBaseRoles = ["admin", "cleaner", "data_entry"];
+const operationalBaseRoles = ["admin", "accountant", "cleaner", "data_entry"];
 
 function roleName(roles: BookingRoleDefinition[], key: string | null | undefined, baseRole?: string) {
   const found = roles.find((role) => role.key === key);
@@ -2044,7 +2044,7 @@ function ManageUsersPanel({
   const openEdit = (user: PortalUser) => {
     const roleKey = user.booking_role_key || user.role || "cleaner";
     const roleDef = roles.find((item) => item.key === roleKey);
-    const baseRole = (roleDef?.base_role || user.role || "cleaner") as "admin" | "cleaner" | "data_entry";
+    const baseRole = (roleDef?.base_role || user.role || "cleaner") as "admin" | "accountant" | "cleaner" | "data_entry";
 
     setSelectedUser(user);
     setEditForm({
@@ -2341,7 +2341,7 @@ function ManageUsersPanel({
   );
 }
 
-function withAdminRole(roles: BookingRoleDefinition[]) {
+function withSystemRoles(roles: BookingRoleDefinition[]) {
   const adminRole: BookingRoleDefinition = {
     key: "admin",
     name: "Admin",
@@ -2351,9 +2351,19 @@ function withAdminRole(roles: BookingRoleDefinition[]) {
     created_at: null,
   };
 
+  const accountantRole: BookingRoleDefinition = {
+    key: "accountant",
+    name: "Accountant",
+    base_role: "accountant",
+    is_system: true,
+    can_access_crm: false,
+    created_at: null,
+  };
+
   return [
     adminRole,
-    ...roles.filter((role) => role.key !== "admin"),
+    accountantRole,
+    ...roles.filter((role) => role.key !== "admin" && role.key !== "accountant"),
   ];
 }
 
@@ -2407,7 +2417,7 @@ function UserEditorForm({
     const result = await response.json();
     setRoleBusy(false);
     if (!response.ok) { setRoleError(result.error || "Unable to add role."); return; }
-    const nextRoles = withAdminRole(
+    const nextRoles = withSystemRoles(
       (result.roles || []) as BookingRoleDefinition[],
     );
     setRoles(nextRoles);
@@ -2419,7 +2429,7 @@ function UserEditorForm({
   };
 
   const updateRoleCrmAccess = async (role: BookingRoleDefinition, enabled: boolean) => {
-    if (role.key === "admin") return;
+    if (role.key === "admin" || role.key === "accountant") return;
     setRoleBusy(true);
     setRoleError("");
     const response = await fetch("/api/admin/booking-roles", {
@@ -2433,7 +2443,7 @@ function UserEditorForm({
       setRoleError(result.error || "Unable to update CRM access.");
       return;
     }
-    setRoles(withAdminRole((result.roles || []) as BookingRoleDefinition[]));
+    setRoles(withSystemRoles((result.roles || []) as BookingRoleDefinition[]));
   };
 
   const deleteRole = async (role: BookingRoleDefinition) => {
@@ -2445,7 +2455,7 @@ function UserEditorForm({
     const result = await response.json();
     setRoleBusy(false);
     if (!response.ok) { setRoleError(result.error || "Unable to delete role."); return; }
-    const nextRoles = withAdminRole(
+    const nextRoles = withSystemRoles(
       (result.roles || []) as BookingRoleDefinition[],
     );
     setRoles(nextRoles);
@@ -2499,7 +2509,7 @@ function UserEditorForm({
                 </div>
                 <label className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2 text-[10px] font-bold text-slate-700">
                   <span>CRM Access</span>
-                  <input type="checkbox" checked={role.key === "admin" ? true : Boolean(role.can_access_crm)} disabled={roleBusy || role.key === "admin"} onChange={(event) => updateRoleCrmAccess(role, event.target.checked)} className="h-4 w-4" />
+                  <input type="checkbox" checked={role.key === "admin" ? true : role.key === "accountant" ? false : Boolean(role.can_access_crm)} disabled={roleBusy || role.key === "admin" || role.key === "accountant"} onChange={(event) => updateRoleCrmAccess(role, event.target.checked)} className="h-4 w-4" />
                 </label>
               </div>
             ))}
@@ -2508,6 +2518,12 @@ function UserEditorForm({
       )}
 
       {!showPassword && <label className="mt-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4"><span><b className="text-sm text-slate-900">Blocked</b><span className="block text-xs text-slate-500">Block or restore portal access.</span></span><input type="checkbox" checked={form.is_blocked} onChange={(event) => update("is_blocked", event.target.checked)} className="h-5 w-5" /></label>}
+
+      {form.role === "accountant" && (
+        <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm text-emerald-800">
+          <b>Invoice-only access:</b> Accountant users are created from here by Admin, but after login they are routed to the Invoice module and do not receive Booking Calendar access.
+        </div>
+      )}
 
       {form.role === "cleaner" && (
         <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4"><h4 className="font-bold text-slate-900">Cleaner Settings</h4><div className="mt-4 grid gap-3 sm:grid-cols-3"><SmallToggle label="Available" checked={form.is_available} onChange={(v) => update("is_available", v)} /><SmallToggle label="Fixed Jobs" checked={form.offering_fixed} onChange={(v) => update("offering_fixed", v)} /><SmallToggle label="Hourly Jobs" checked={form.offering_hourly} onChange={(v) => update("offering_hourly", v)} /></div><div className="mt-4 max-w-xs"><UserInput icon={DollarSign} label="Hourly Rate" value={form.hourly_rate} onChange={(v) => update("hourly_rate", v)} type="number" /></div></div>

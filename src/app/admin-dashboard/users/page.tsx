@@ -5,7 +5,7 @@ export default async function AdminUsersPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("users")
-    .select("id, name, email, phone_number, role, approval_status, source, is_blocked, verified, is_online, is_available, is_working, created_at")
+    .select("id, name, email, phone_number, role, approval_status, source, is_blocked, verified, is_online, is_available, is_working, invoice_access, created_at")
     .order("created_at", { ascending: false });
 
   const users: AdminUserRecord[] = (data || []).map((user) => ({
@@ -21,6 +21,7 @@ export default async function AdminUsersPage() {
     is_online: user.is_online,
     is_available: user.is_available,
     is_working: user.is_working,
+    invoice_access: user.invoice_access,
     created_at: user.created_at,
   }));
 

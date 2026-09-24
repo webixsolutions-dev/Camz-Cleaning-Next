@@ -1,12 +1,13 @@
 import { dollarsToCents } from "@/lib/crm/services/invoiceCalc";
-import { getCrmActor } from "@/lib/crm/staff";
+import { getInvoiceActor } from "@/lib/crm/staff";
+import { writeCrmAudit } from "@/lib/crm/services/audit";
 import { enforceMutationSecurity } from "@/lib/security/http";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
   const securityError = await enforceMutationSecurity(request, { bucket: "crm-payments-post", limit: 60, windowSeconds: 60 });
   if (securityError) return securityError;
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
 
   try {
@@ -34,6 +35,19 @@ export async function POST(request: NextRequest) {
     });
 
     if (!rpcError) {
+      await supabase.from("crm_invoice_events").insert({
+        invoice_id: invoiceId,
+        event_type: "payment_recorded",
+        payload: { amount_cents: amount, method: body.method || "e_transfer" },
+        created_by: actor.userId,
+      });
+      await writeCrmAudit(supabase, {
+        entity_type: "crm_invoices",
+        entity_id: invoiceId,
+        action: "payment_recorded",
+        after: { amount_cents: amount, method: body.method || "e_transfer" },
+        actor_id: actor.userId,
+      });
       return NextResponse.json({ payment: data });
     }
 
@@ -73,6 +87,19 @@ export async function POST(request: NextRequest) {
       console.error("CRM payment insert failed:", insertError);
       return NextResponse.json({ error: insertError.message }, { status: 400 });
     }
+    await supabase.from("crm_invoice_events").insert({
+      invoice_id: invoiceId,
+      event_type: "payment_recorded",
+      payload: { amount_cents: amount, method: body.method || "e_transfer" },
+      created_by: actor.userId,
+    });
+    await writeCrmAudit(supabase, {
+      entity_type: "crm_invoices",
+      entity_id: invoiceId,
+      action: "payment_recorded",
+      after: inserted,
+      actor_id: actor.userId,
+    });
     return NextResponse.json({ payment: inserted });
   } catch (err) {
     console.error("CRM payments POST failed:", err);
@@ -83,7 +110,7 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const securityError = await enforceMutationSecurity(request, { bucket: "crm-payments-patch", limit: 60, windowSeconds: 60 });
   if (securityError) return securityError;
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
   if (!actor.isAdmin) return NextResponse.json({ error: "Only an admin can void a payment." }, { status: 403 });
 

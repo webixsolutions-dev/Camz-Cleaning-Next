@@ -1,6 +1,6 @@
 import { isDeliverableEmail } from "@/lib/crm/emailAddress";
 import { sendCrmPaymentReminder } from "@/lib/crm/services/reminders";
-import { getCrmActor } from "@/lib/crm/staff";
+import { getInvoiceActor } from "@/lib/crm/staff";
 import { enforceMutationSecurity, readJsonBody, securityErrorResponse } from "@/lib/security/http";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -17,7 +17,7 @@ async function loadInvoice(supabase: any, invoiceId: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
   const invoiceId = clean(new URL(request.url).searchParams.get("invoice_id"), 80);
   if (!invoiceId) return NextResponse.json({ error: "Invoice id is required." }, { status: 400 });
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     windowSeconds: 60,
   });
   if (securityError) return securityError;
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
 
   try {
@@ -108,7 +108,7 @@ export async function PATCH(request: NextRequest) {
     windowSeconds: 60,
   });
   if (securityError) return securityError;
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
 
   try {

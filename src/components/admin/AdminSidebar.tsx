@@ -34,6 +34,7 @@ type AdminLink = {
   icon: typeof LayoutDashboard;
   roles?: string[];
   crmAccess?: boolean;
+  invoiceAccess?: boolean;
 };
 
 type AdminGroup = {
@@ -132,7 +133,7 @@ const groups: AdminGroup[] = [
         label: "Invoices",
         href: "/admin-dashboard/crm/invoices",
         icon: ReceiptText,
-        crmAccess: true,
+        invoiceAccess: true,
       },
       {
         label: "CRM Reports",
@@ -191,9 +192,11 @@ const groups: AdminGroup[] = [
 export default function AdminSidebar({
   role = "admin",
   canAccessCrm = false,
+  canAccessInvoices = false,
 }: {
   role?: string;
   canAccessCrm?: boolean;
+  canAccessInvoices?: boolean;
 }) {
   const pathname = usePathname();
   const { signOut } = useAuth();
@@ -236,6 +239,8 @@ export default function AdminSidebar({
         {groups.map((group) => {
           const visibleLinks = group.links.filter((item) => {
             if (role === "admin") return true;
+            if (role === "accountant") return Boolean(item.invoiceAccess && canAccessInvoices);
+            if (item.invoiceAccess) return canAccessInvoices;
             if (item.crmAccess) return canAccessCrm;
             return Boolean(item.roles?.includes(role));
           });

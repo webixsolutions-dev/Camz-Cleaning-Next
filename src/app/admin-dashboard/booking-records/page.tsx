@@ -180,7 +180,17 @@ export default async function BookingRecordsPage() {
       can_access_crm: true,
       created_at: "",
     },
-    ...bookingRoleDefinitions.filter((role) => role.key !== "admin"),
+    {
+      key: "accountant",
+      name: "Accountant",
+      base_role: "accountant",
+      is_system: true,
+      can_access_crm: false,
+      created_at: "",
+    },
+    ...bookingRoleDefinitions.filter(
+      (role) => role.key !== "admin" && role.key !== "accountant",
+    ),
   ];
 
   const roleMap = new Map(roleDefinitions.map((role) => [role.key, role]));
@@ -221,7 +231,7 @@ export default async function BookingRecordsPage() {
   // Only Admin receives the full booking-user directory in the client UI.
   // Data Entry receives only the cleaner options required for assignment.
   const managedUsers = actorRole === "admin"
-    ? portalUsers.filter((user) => ["admin", "cleaner", "data_entry"].includes(user.role))
+    ? portalUsers.filter((user) => ["admin", "accountant", "cleaner", "data_entry"].includes(user.role))
     : [];
 
   const operationalUserMap = new Map(

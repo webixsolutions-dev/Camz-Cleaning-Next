@@ -17,15 +17,15 @@ type UserPayload = {
   offering_fixed?: boolean;
   offering_hourly?: boolean;
   hourly_rate?: string;
+  invoice_access?: boolean;
 };
 
 const CREATABLE_ROLES_BY_ACTOR: Record<string, Set<string>> = {
-  admin: new Set(["admin", "customer", "cleaner", "data_entry"]),
-  data_entry: new Set(["customer", "cleaner", "data_entry"]),
+  admin: new Set(["admin", "accountant", "customer", "cleaner", "data_entry"]),
 };
 const APPROVAL_STATUSES = new Set(["approved", "pending", "rejected"]);
 
-async function getActor(): Promise<{ role: string } | null> {
+async function getActor(): Promise<{ id: string; role: string } | null> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -33,7 +33,7 @@ async function getActor(): Promise<{ role: string } | null> {
   if (!user) return null;
   const { data: profile } = await supabase.from("users").select("role, is_blocked").eq("id", user.id).maybeSingle();
   if (!profile || profile.is_blocked !== false) return null;
-  return { role: String(profile.role || "").toLowerCase() };
+  return { id: user.id, role: String(profile.role || "").toLowerCase() };
 }
 
 function getServiceClient() {
@@ -94,13 +94,14 @@ export async function POST(request: NextRequest) {
     offering_fixed: role === "cleaner" ? body.offering_fixed ?? true : false,
     offering_hourly: role === "cleaner" ? Boolean(body.offering_hourly) : false,
     hourly_rate: role === "cleaner" ? body.hourly_rate || "0" : "0",
+    invoice_access: role === "accountant" ? true : role === "data_entry" ? Boolean(body.invoice_access) : false,
   };
 
   const { error: profileError } = await admin.from("users").upsert(profile, { onConflict: "id" });
   if (profileError) {
     await admin.auth.admin.deleteUser(authData.user.id);
     if (profileError.message.includes("invalid input value for enum user_role")) {
-      return NextResponse.json({ error: "The data_entry role is missing from the Supabase user_role enum. Run: alter type public.user_role add value if not exists 'data_entry';" }, { status: 400 });
+      return NextResponse.json({ error: "The selected staff role is missing from the Supabase user_role enum. Run the latest invoice roles migration before creating Accountant or Data Entry users." }, { status: 400 });
     }
     return NextResponse.json({ error: profileError.message }, { status: 400 });
   }
@@ -122,12 +123,70 @@ export async function PATCH(request: NextRequest) {
   const body = (await request.json()) as UserPayload & { id?: string; is_blocked?: boolean };
   if (!body.id) return NextResponse.json({ error: "User id is required." }, { status: 400 });
 
+  const { data: target, error: targetError } = await admin
+    .from("users")
+    .select("id, role")
+    .eq("id", body.id)
+    .maybeSingle();
+  if (targetError) return NextResponse.json({ error: targetError.message }, { status: 400 });
+  if (!target) return NextResponse.json({ error: "User not found." }, { status: 404 });
+
   const updates: Record<string, string | boolean> = {};
   if (typeof body.is_blocked === "boolean") updates.is_blocked = body.is_blocked;
   if (body.approval_status) updates.approval_status = body.approval_status;
+  if (typeof body.invoice_access === "boolean") {
+    if (String(target.role || "").toLowerCase() !== "data_entry") {
+      return NextResponse.json({ error: "Invoice Access can only be toggled for Data Entry users." }, { status: 400 });
+    }
+    updates.invoice_access = body.invoice_access;
+  }
   if (!Object.keys(updates).length) return NextResponse.json({ error: "No user changes were provided." }, { status: 400 });
 
   const { error } = await admin.from("users").update(updates).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(request: NextRequest) {
+  const securityError = await enforceMutationSecurity(request, { bucket: "users-delete", limit: 20, windowSeconds: 60 });
+  if (securityError) return securityError;
+
+  const actor = await getActor();
+  if (actor?.role !== "admin") {
+    return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY is not configured on the server." }, { status: 503 });
+  }
+
+  const id = new URL(request.url).searchParams.get("id")?.trim();
+  if (!id) return NextResponse.json({ error: "User id is required." }, { status: 400 });
+  if (id === actor.id) {
+    return NextResponse.json({ error: "You cannot remove your own Admin account." }, { status: 400 });
+  }
+
+  const { data: target, error: targetError } = await admin
+    .from("users")
+    .select("id, role, email")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (targetError) return NextResponse.json({ error: targetError.message }, { status: 400 });
+  if (!target) return NextResponse.json({ error: "User not found." }, { status: 404 });
+
+  const { error: authDeleteError } = await admin.auth.admin.deleteUser(id);
+  if (authDeleteError) {
+    return NextResponse.json({ error: authDeleteError.message }, { status: 400 });
+  }
+
+  // Auth-user deletion normally cascades to the profile. Keep this fallback so
+  // environments without that FK cascade do not leave a portal account behind.
+  const { error: profileDeleteError } = await admin.from("users").delete().eq("id", id);
+  if (profileDeleteError) {
+    console.warn("User auth account removed but profile cleanup failed:", profileDeleteError);
+  }
+
   return NextResponse.json({ ok: true });
 }

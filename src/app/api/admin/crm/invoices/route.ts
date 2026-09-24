@@ -1,7 +1,7 @@
 import { calculateInvoiceTotals, dollarsToCents, lineTotalCents, type InvoiceDiscountType } from "@/lib/crm/services/invoiceCalc";
 import { deliverLoggedInvoiceEmail } from "@/lib/crm/services/email";
 import { writeCrmAudit } from "@/lib/crm/services/audit";
-import { getCrmActor } from "@/lib/crm/staff";
+import { getInvoiceActor } from "@/lib/crm/staff";
 import { enforceMutationSecurity } from "@/lib/security/http";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -24,6 +24,7 @@ type InvoiceBody = {
   service_address_id?: string | null;
   invoice_date?: string | null;
   service_date?: string | null;
+  service_type?: string | null;
   due_date?: string | null;
   notes?: string;
   note?: string;
@@ -78,13 +79,13 @@ function normalizeItems(items: ItemInput[]) {
   });
 }
 
-async function loadSettings(supabase: Awaited<ReturnType<typeof getCrmActor>>["supabase"]) {
+async function loadSettings(supabase: Awaited<ReturnType<typeof getInvoiceActor>>["supabase"]) {
   const { data, error } = await supabase.from("crm_company_settings").select("*").eq("id", 1).maybeSingle();
   if (error) throw error;
   return (data || {}) as CompanySettings;
 }
 
-async function loadInvoice(supabase: Awaited<ReturnType<typeof getCrmActor>>["supabase"], id: string) {
+async function loadInvoice(supabase: Awaited<ReturnType<typeof getInvoiceActor>>["supabase"], id: string) {
   return supabase
     .from("crm_invoices")
     .select("*, crm_customers(display_name, customer_code, email, phone, crm_customer_addresses(*)), crm_invoice_items(*), crm_payments(*), crm_invoice_events(*), crm_invoice_emails(*), crm_invoice_revisions(*), crm_invoice_internal_notes(*)")
@@ -93,7 +94,7 @@ async function loadInvoice(supabase: Awaited<ReturnType<typeof getCrmActor>>["su
 }
 
 async function findPossibleDuplicates(
-  supabase: Awaited<ReturnType<typeof getCrmActor>>["supabase"],
+  supabase: Awaited<ReturnType<typeof getInvoiceActor>>["supabase"],
   invoice: {
     id: string;
     customer_id: string;
@@ -136,8 +137,9 @@ function validateDates(invoiceDate?: string | null, dueDate?: string | null) {
 }
 
 export async function GET(request: NextRequest) {
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
+
   try {
     const id = new URL(request.url).searchParams.get("id");
     if (id) {
@@ -145,12 +147,54 @@ export async function GET(request: NextRequest) {
       if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 400 });
       return NextResponse.json({ invoices: data ? [data] : [] });
     }
+
     const { data, error: fetchError } = await supabase
       .from("crm_invoices")
-      .select("*, crm_customers(display_name, email, phone)")
+      .select("id, invoice_number, status, is_void, invoice_date, service_date, service_type, due_date, total_cents, amount_paid_cents, balance_cents, service_address_id, created_by, created_at, updated_at, crm_customers(display_name, email, phone, crm_customer_addresses(id, label, line1, line2, city, province, postal_code, is_service, is_billing)), crm_invoice_items(description, position)")
       .order("created_at", { ascending: false });
     if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 400 });
-    return NextResponse.json({ invoices: data || [] });
+
+    const invoices = data || [];
+    const invoiceIds = invoices.map((row: any) => row.id).filter(Boolean);
+    const { data: audits } = invoiceIds.length
+      ? await supabase
+          .from("crm_audit_logs")
+          .select("entity_id, action, actor_id, created_at")
+          .eq("entity_type", "crm_invoices")
+          .in("entity_id", invoiceIds)
+          .order("created_at", { ascending: false })
+      : { data: [] as any[] };
+
+    const actorIds = Array.from(
+      new Set([
+        ...invoices.map((row: any) => row.created_by),
+        ...(audits || []).map((row: any) => row.actor_id),
+      ].filter(Boolean)),
+    );
+
+    const { data: staff } = actorIds.length
+      ? await supabase.from("users").select("id, name, email").in("id", actorIds)
+      : { data: [] as any[] };
+
+    const staffMap = new Map(
+      (staff || []).map((row: any) => [row.id, `${row.name || "Staff"}${row.email ? ` <${row.email}>` : ""}`]),
+    );
+    const latestAudit = new Map<string, any>();
+    for (const audit of audits || []) {
+      if (!latestAudit.has(audit.entity_id)) latestAudit.set(audit.entity_id, audit);
+    }
+
+    const decorated = invoices.map((invoice: any) => {
+      const audit = latestAudit.get(invoice.id);
+      return {
+        ...invoice,
+        created_by_label: staffMap.get(invoice.created_by) || "System",
+        last_edited_by_label: staffMap.get(audit?.actor_id) || staffMap.get(invoice.created_by) || "System",
+        last_updated_at: audit?.created_at || invoice.updated_at || invoice.created_at,
+      };
+    });
+
+    return NextResponse.json({ invoices: decorated });
   } catch (err) {
     console.error("CRM invoices GET failed:", err);
     return NextResponse.json({ error: "Unable to load invoices." }, { status: 500 });
@@ -160,7 +204,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const securityError = await enforceMutationSecurity(request, { bucket: "crm-invoices-post", limit: 60, windowSeconds: 60 });
   if (securityError) return securityError;
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
 
   try {
@@ -196,6 +240,7 @@ export async function POST(request: NextRequest) {
         service_address_id: body.service_address_id || null,
         invoice_date: invoiceDate,
         service_date: body.service_date || null,
+        service_type: String(body.service_type || "").trim() || null,
         due_date: dueDate,
         notes: body.notes ?? settings.default_customer_note ?? null,
         currency: settings.default_currency || "CAD",
@@ -242,7 +287,7 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const securityError = await enforceMutationSecurity(request, { bucket: "crm-invoices-patch", limit: 90, windowSeconds: 60 });
   if (securityError) return securityError;
-  const { actor, supabase, error, status } = await getCrmActor();
+  const { actor, supabase, error, status } = await getInvoiceActor();
   if (!actor) return NextResponse.json({ error }, { status });
 
   try {
@@ -291,6 +336,9 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (body.action === "void") {
+      if (!actor.isAdmin) {
+        return NextResponse.json({ error: "Only Admin can void an invoice." }, { status: 403 });
+      }
       const reason = body.void_reason?.trim();
       if (!reason) return NextResponse.json({ error: "Enter a void reason first." }, { status: 400 });
       const { data, error: rpcError } = await supabase.rpc("crm_void_invoice", { p_invoice_id: body.id, p_reason: reason });
@@ -325,6 +373,7 @@ export async function PATCH(request: NextRequest) {
       service_address_id: body.service_address_id === undefined ? existing.service_address_id : body.service_address_id,
       invoice_date: invoiceDate,
       service_date: body.service_date === undefined ? existing.service_date : body.service_date,
+      service_type: body.service_type === undefined ? existing.service_type : String(body.service_type || "").trim() || null,
       due_date: dueDate,
       notes: body.notes === undefined ? existing.notes : body.notes,
       discount_type: discountType,
@@ -350,7 +399,7 @@ export async function PATCH(request: NextRequest) {
 }
 
 async function replaceItems(
-  supabase: Awaited<ReturnType<typeof getCrmActor>>["supabase"],
+  supabase: Awaited<ReturnType<typeof getInvoiceActor>>["supabase"],
   invoiceId: string,
   items: ReturnType<typeof normalizeItems>,
 ) {
@@ -386,7 +435,7 @@ async function replaceItems(
 }
 
 async function sendInvoice(
-  supabase: Awaited<ReturnType<typeof getCrmActor>>["supabase"],
+  supabase: Awaited<ReturnType<typeof getInvoiceActor>>["supabase"],
   userId: string,
   body: InvoiceBody,
   reminder = false,

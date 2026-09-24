@@ -21,6 +21,7 @@ type UserData = {
   approval_status: string;
   source: string;
   is_blocked: boolean;
+  invoice_access?: boolean;
 };
 
 type AuthContextType = {
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("users")
         .select(
-          "id, name, email, role, phone_number, approval_status, source, is_blocked",
+          "id, name, email, role, phone_number, approval_status, source, is_blocked, invoice_access",
         )
         .eq("id", userId)
         .maybeSingle();
@@ -152,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { data: profile, error: profileError } = await supabase
         .from("users")
-        .select("role, is_blocked")
+        .select("role, is_blocked, invoice_access")
         .eq("id", authData.user.id)
         .maybeSingle();
 
@@ -172,9 +173,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         redirectTo:
           role === "admin"
             ? "/admin-dashboard"
-            : ["data_entry", "cleaner"].includes(role || "")
-              ? "/admin-dashboard/booking-records"
-              : "/customer-dashboard",
+            : role === "accountant"
+              ? "/admin-dashboard/crm/invoices"
+              : ["data_entry", "cleaner"].includes(role || "")
+                ? "/admin-dashboard/booking-records"
+                : "/customer-dashboard",
       };
     } catch (error) {
       console.error("Sign in error:", error);

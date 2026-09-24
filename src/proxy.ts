@@ -149,7 +149,7 @@ export async function proxy(request: NextRequest) {
 
   const { data: profile } = await supabase
     .from("users")
-    .select("role, booking_role_key, is_blocked")
+    .select("role, booking_role_key, invoice_access, is_blocked")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -162,9 +162,11 @@ export async function proxy(request: NextRequest) {
   const metaRole = String(user.app_metadata?.role || user.user_metadata?.role || user.role || "").toLowerCase();
 
   // Smart Role Checking
-  let role = "customer"; 
+  let role = "customer";
   if (dbRole === "admin" || metaRole === "admin") {
     role = "admin";
+  } else if (dbRole === "accountant" || metaRole === "accountant") {
+    role = "accountant";
   } else if (dbRole === "data_entry" || metaRole === "data_entry" || dbRole === "cleaner" || metaRole === "cleaner") {
     role = dbRole || metaRole;
   } else {
@@ -177,6 +179,8 @@ export async function proxy(request: NextRequest) {
   if (path === "/dashboard" || path === "/dashboard/") {
     if (role === "admin") {
       return NextResponse.redirect(new URL("/admin-dashboard", request.url));
+    } else if (role === "accountant") {
+      return NextResponse.redirect(new URL("/admin-dashboard/crm/invoices", request.url));
     } else if (role === "data_entry" || role === "cleaner") {
       // Data entry and cleaners only have access to records as per your earlier code
       return NextResponse.redirect(new URL("/admin-dashboard/booking-records", request.url));
@@ -190,35 +194,60 @@ export async function proxy(request: NextRequest) {
     return forbidden(request);
   }
 
+  const isInvoicePage = path.startsWith("/admin-dashboard/crm/invoices");
+  const isInvoiceApi =
+    path.startsWith("/api/admin/crm/invoices") ||
+    path.startsWith("/api/admin/crm/payments") ||
+    path.startsWith("/api/admin/crm/reminders");
+  const hasPerUserInvoiceAccess = Boolean(profile.invoice_access);
+
   if (path.startsWith("/admin-dashboard")) {
     if (role === "admin") {
-      // full access
+      // Admin has full dashboard access.
+    } else if (role === "accountant") {
+      if (!isInvoicePage) return forbidden(request);
     } else if (["cleaner", "data_entry"].includes(role)) {
-      const isCalendarPath = path.startsWith("/admin-dashboard/booking-records");
-      const isBeforeAfterPath = path.startsWith("/admin-dashboard/before-after");
-      const isCrmPath = path.startsWith("/admin-dashboard/crm");
+      if (isInvoicePage) {
+        if (role !== "data_entry" || !hasPerUserInvoiceAccess) {
+          return forbidden(request);
+        }
+      } else {
+        const isCalendarPath = path.startsWith("/admin-dashboard/booking-records");
+        const isBeforeAfterPath = path.startsWith("/admin-dashboard/before-after");
+        const isCrmPath = path.startsWith("/admin-dashboard/crm");
 
-      let canAccessCrm = false;
-      if (isCrmPath) {
-        const roleKey = String(profile.booking_role_key || role).toLowerCase();
-        const { data: bookingRole } = await supabase
-          .from("booking_roles")
-          .select("can_access_crm")
-          .eq("key", roleKey)
-          .maybeSingle();
-        canAccessCrm = Boolean(bookingRole?.can_access_crm);
-      }
+        let canAccessCrm = false;
+        if (isCrmPath) {
+          const roleKey = String(profile.booking_role_key || role).toLowerCase();
+          const { data: bookingRole } = await supabase
+            .from("booking_roles")
+            .select("can_access_crm")
+            .eq("key", roleKey)
+            .maybeSingle();
+          canAccessCrm = Boolean(bookingRole?.can_access_crm);
+        }
 
-      if (!isCalendarPath && !isBeforeAfterPath && !(isCrmPath && canAccessCrm)) {
-        return forbidden(request);
+        if (!isCalendarPath && !isBeforeAfterPath && !(isCrmPath && canAccessCrm)) {
+          return forbidden(request);
+        }
       }
     } else {
       return forbidden(request);
     }
   }
 
-  if (path.startsWith("/api/admin") && !["admin", "cleaner", "data_entry"].includes(role)) {
-    return forbidden(request);
+  if (path.startsWith("/api/admin")) {
+    if (role === "admin") {
+      // Admin can use all admin APIs.
+    } else if (role === "accountant") {
+      if (!isInvoiceApi) return forbidden(request);
+    } else if (role === "data_entry") {
+      if (isInvoiceApi && !hasPerUserInvoiceAccess) return forbidden(request);
+    } else if (role === "cleaner") {
+      if (isInvoiceApi) return forbidden(request);
+    } else {
+      return forbidden(request);
+    }
   }
 
   const guarded = await applySessionGuard(request, response);

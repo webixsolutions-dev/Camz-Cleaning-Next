@@ -27,6 +27,7 @@ type UserForm = {
   offering_fixed: boolean;
   offering_hourly: boolean;
   hourly_rate: string;
+  invoice_access: boolean;
 };
 
 const emptyForm: UserForm = {
@@ -41,6 +42,7 @@ const emptyForm: UserForm = {
   offering_fixed: true,
   offering_hourly: false,
   hourly_rate: "0",
+  invoice_access: false,
 };
 
 type CreateUserModalProps = {
@@ -222,12 +224,14 @@ export default function CreateUserModal({
 
               <select
                 value={form.role}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const nextRole = event.target.value;
                   setForm({
                     ...form,
-                    role: event.target.value,
-                  })
-                }
+                    role: nextRole,
+                    invoice_access: nextRole === "accountant" ? true : nextRole === "data_entry" ? form.invoice_access : false,
+                  });
+                }}
                 className="h-10 w-full rounded-lg border border-slate-200 bg-[#F8FAFD] px-3 text-[10px] font-medium text-slate-700 outline-none focus:border-blue-300 focus:bg-white"
               >
                 {allowedRoles.map(
@@ -273,6 +277,29 @@ export default function CreateUserModal({
               </select>
             </label>
           </div>
+
+
+          {form.role === "data_entry" && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+              <h3 className="text-[11px] font-bold text-[#13263A]">Invoice Permission</h3>
+              <p className="mt-1 text-[10px] leading-5 text-slate-500">
+                Admin can enable or remove Invoice access without changing the user's normal Data Entry access.
+              </p>
+              <div className="mt-3">
+                <Toggle
+                  label="Invoice Access"
+                  checked={form.invoice_access}
+                  onChange={(value) => setForm({ ...form, invoice_access: value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {form.role === "accountant" && (
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-[10px] leading-5 text-emerald-800">
+              Accountant accounts have invoice-only access and are redirected directly to the Invoice section after login.
+            </div>
+          )}
 
           {form.role === "cleaner" && (
             <div className="rounded-xl border border-slate-200 bg-[#F8FAFD] p-3">

@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   RefreshCw,
   ShieldCheck,
+  ReceiptText,
   UserCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -37,7 +38,7 @@ export default async function AdminDashboardLayout({
 
   const { data: profile } = await supabase
     .from("users")
-    .select("role, booking_role_key, is_blocked")
+    .select("role, booking_role_key, invoice_access, is_blocked")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -46,13 +47,18 @@ export default async function AdminDashboardLayout({
   if (
     !profile ||
     profile.is_blocked ||
-    !["admin", "data_entry", "cleaner"].includes(role || "")
+    !["admin", "accountant", "data_entry", "cleaner"].includes(role || "")
   ) {
     redirect("/customer-dashboard");
   }
 
+  const canAccessInvoices =
+    role === "admin" ||
+    role === "accountant" ||
+    (role === "data_entry" && Boolean(profile.invoice_access));
+
   let canAccessCrm = role === "admin";
-  if (!canAccessCrm) {
+  if (!canAccessCrm && (role === "data_entry" || role === "cleaner")) {
     const roleKey = String(profile.booking_role_key || role || "").toLowerCase();
     if (roleKey) {
       const { data: crmRole } = await supabase
@@ -83,7 +89,16 @@ export default async function AdminDashboardLayout({
             iconClass:
               "bg-orange-50 text-orange-600",
           }
-        : {
+        : role === "accountant"
+          ? {
+              title: "Accountant - Invoices",
+              subtitle:
+                "Create, update, download, and manage invoice records.",
+              icon: ReceiptText,
+              iconClass:
+                "bg-emerald-50 text-emerald-600",
+            }
+          : {
             title: "Admin Dashboard",
             subtitle:
               "Manage customer requests and operations.",
@@ -97,7 +112,7 @@ export default async function AdminDashboardLayout({
   return (
     <AuthProvider>
       <div className="admin-dashboard-scope min-h-screen bg-[#F4F7FB]">
-        <AdminSidebar role={role || "admin"} canAccessCrm={canAccessCrm} />
+        <AdminSidebar role={role || "admin"} canAccessCrm={canAccessCrm} canAccessInvoices={canAccessInvoices} />
 
         <div className="min-w-0 lg:ml-[236px]">
           {/* DESKTOP HEADER */}
@@ -114,7 +129,7 @@ export default async function AdminDashboardLayout({
 
             <div className="flex items-center gap-2">
               <a
-                href="/admin-dashboard/booking-records"
+                href={role === "accountant" ? "/admin-dashboard/crm/invoices" : "/admin-dashboard/booking-records"}
                 aria-label="Refresh dashboard"
                 className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-[#4A86F7]"
               >
