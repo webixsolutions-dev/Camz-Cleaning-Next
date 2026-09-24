@@ -4,13 +4,16 @@ import type { CompanyLike, InvoiceAddress, InvoiceLike } from "@/lib/crm/pdf";
 
 const PAGE_W = 612;
 const PAGE_H = 792;
-const MARGIN = 48;
+const MARGIN = 42;
 const CONTENT_W = PAGE_W - MARGIN * 2;
-const NAVY = rgb(0.125, 0.149, 0.176);
-const MUTED = rgb(0.38, 0.41, 0.45);
-const RULE = rgb(0.57, 0.62, 0.66);
-const LIGHT_RULE = rgb(0.80, 0.82, 0.84);
-const VOID_RED = rgb(0.88, 0.11, 0.28);
+const BLUE = rgb(0.059, 0.361, 0.659);
+const NAVY = rgb(0.09, 0.125, 0.20);
+const TEXT = rgb(0.20, 0.25, 0.32);
+const MUTED = rgb(0.42, 0.47, 0.55);
+const LIGHT = rgb(0.90, 0.93, 0.96);
+const PALE_BLUE = rgb(0.95, 0.98, 1.0);
+const WHITE = rgb(1, 1, 1);
+const RED = rgb(0.78, 0.17, 0.27);
 
 function money(cents?: number | null) {
   return `$${centsToDollars(cents)}`;
@@ -22,24 +25,15 @@ function formatQuantity(value: unknown) {
   return String(Math.max(0, Math.round(quantity)));
 }
 
-function formatDate(value?: string | null, long = false) {
+function formatDate(value?: string | null) {
   if (!value) return "";
   const date = new Date(value.includes("T") ? value : `${value}T12:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US", {
-    month: long ? "long" : "short",
-    day: "numeric",
+  return new Intl.DateTimeFormat("en-US", {
+    month: "2-digit",
+    day: "2-digit",
     year: "numeric",
-  });
-}
-
-function paymentLabel(method?: string | null) {
-  const key = String(method || "").toLowerCase();
-  if (key === "e_transfer") return "Transfer";
-  if (key === "card") return "Card";
-  if (key === "cash") return "Cash";
-  if (key === "cheque") return "Cheque";
-  return method ? method.replaceAll("_", " ") : "Other";
+  }).format(date);
 }
 
 function publicDiscountReason(value?: string | null) {
@@ -56,8 +50,8 @@ function addressLines(address?: InvoiceAddress | null) {
   ].filter(Boolean) as string[];
 }
 
-function wrap(font: PDFFont, text: string, size: number, maxWidth: number) {
-  const words = String(text || "").split(/\s+/).filter(Boolean);
+function wrap(font: PDFFont, value: string, size: number, maxWidth: number) {
+  const words = String(value || "").split(/\s+/).filter(Boolean);
   if (!words.length) return [""];
   const lines: string[] = [];
   let current = "";
@@ -105,6 +99,17 @@ async function embedLogo(doc: PDFDocument, src?: string | null): Promise<PDFImag
   }
 }
 
+function statusLabel(invoice: InvoiceLike) {
+  if (invoice.is_void) return "CANCELLED";
+  const status = String(invoice.status || "draft").toLowerCase();
+  if (status === "draft") return "DRAFT";
+  if (status === "issued" || status === "overdue") return "UNPAID";
+  if (status === "partially_paid") return "PARTIALLY PAID";
+  if (status === "paid") return "PAID";
+  if (status === "void" || status === "cancelled") return "CANCELLED";
+  return status.replaceAll("_", " ").toUpperCase();
+}
+
 export async function buildInvoicePdfBytes(options: {
   invoice: InvoiceLike;
   company?: CompanyLike;
@@ -113,23 +118,31 @@ export async function buildInvoicePdfBytes(options: {
   const invoice = options.invoice;
   const company = options.company || {};
   const number = invoice.invoice_number || "DRAFT";
-  const companyName = company.trade_name || company.legal_name || "Camz Cleaning";
+  const companyName = company.trade_name || "Camz Cleaning";
+  const legalName = company.legal_name || "Camzio Professional Services Inc.";
   const companyEmail = company.email || "info@camzcleaning.com";
-  const companyPhone = company.phone || "(587) 837-1977";
+  const companyPhone = company.phone || "587-837-1977";
+  const companyWebsite = company.website || "www.camzcleaning.com";
+  const companyAddress = [
+    company.address_line1 || "4 Saddlecreek Terrace NE",
+    company.address_line2,
+    [company.city || "Calgary", company.province || "AB", company.postal_code || "T3J 4A5"]
+      .filter(Boolean)
+      .join(" "),
+  ].filter(Boolean) as string[];
+
   const customer = invoice.crm_customers;
-  const address = invoice.billing_address || customer?.crm_customer_addresses?.[0] || null;
-  const serviceAddress = invoice.service_address || null;
-  const showServiceAddress =
-    serviceAddress && addressLines(serviceAddress).join("|") !== addressLines(address).join("|");
+  const billingAddress = invoice.billing_address || customer?.crm_customer_addresses?.[0] || null;
+  const serviceAddress = invoice.service_address || billingAddress || null;
   const items = invoice.crm_invoice_items || [];
-  const payments = (invoice.crm_payments || []).filter((row) => !row.is_void);
+  const serviceType = invoice.service_type || invoice.service_name || items[0]?.description || "Cleaning Service";
   const paid = Number(invoice.amount_paid_cents || 0);
   const total = Number(invoice.total_cents || 0);
   const tax = Number(invoice.tax_cents || 0);
   const discount = Number(invoice.discount_cents || 0);
   const discountReason = publicDiscountReason(invoice.discount_reason);
   const balance = Number(invoice.balance_cents || 0);
-  const fullyPaid = paid > 0 && balance <= 0 && !invoice.is_void;
+  const status = statusLabel(invoice);
 
   const doc = await PDFDocument.create();
   const regular = await doc.embedFont(StandardFonts.Helvetica);
@@ -138,254 +151,260 @@ export async function buildInvoicePdfBytes(options: {
 
   let page = doc.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - MARGIN;
-  const footerReserve = 68;
+  const footerReserve = 52;
 
-  const text = (
+  const drawText = (
     target: PDFPage,
     value: string,
     x: number,
     top: number,
     size: number,
-    font: PDFFont,
-    color = NAVY,
+    font: PDFFont = regular,
+    color = TEXT,
   ) => {
     target.drawText(String(value ?? ""), { x, y: top - size, size, font, color });
   };
 
   const drawRight = (
+    target: PDFPage,
     value: string,
     x: number,
     top: number,
-    size = 10,
+    size: number,
     font: PDFFont = regular,
-    color = NAVY,
+    color = TEXT,
   ) => {
-    text(page, value, x - font.widthOfTextAtSize(value, size), top, size, font, color);
+    const width = font.widthOfTextAtSize(value, size);
+    drawText(target, value, x - width, top, size, font, color);
   };
 
-  const line = (target: PDFPage, x1: number, yPos: number, x2: number, thickness = 1, color = LIGHT_RULE) => {
-    target.drawLine({ start: { x: x1, y: yPos }, end: { x: x2, y: yPos }, thickness, color });
+  const drawLine = (target: PDFPage, yPos: number, color = LIGHT, thickness = 1) => {
+    target.drawLine({ start: { x: MARGIN, y: yPos }, end: { x: PAGE_W - MARGIN, y: yPos }, color, thickness });
+  };
+
+  const addPage = () => {
+    page = doc.addPage([PAGE_W, PAGE_H]);
+    y = PAGE_H - MARGIN;
   };
 
   const ensure = (need: number) => {
-    if (y - need < MARGIN + footerReserve) {
-      page = doc.addPage([PAGE_W, PAGE_H]);
-      y = PAGE_H - MARGIN;
-    }
+    if (y - need < MARGIN + footerReserve) addPage();
   };
 
-  // Letterhead - intentionally compact to match the supplied reference invoice.
+  // Header: larger logo with company name and subtitle directly underneath.
+  let logoBottom = y - 74;
   if (logo) {
-    const size = 54;
-    const scaled = logo.scaleToFit(size, size);
-    page.drawImage(logo, {
-      x: MARGIN,
-      y: y - scaled.height,
-      width: scaled.width,
-      height: scaled.height,
-    });
+    const scaled = logo.scaleToFit(142, 74);
+    page.drawImage(logo, { x: MARGIN, y: y - scaled.height, width: scaled.width, height: scaled.height });
+    logoBottom = y - scaled.height;
+  } else {
+    page.drawRectangle({ x: MARGIN, y: y - 66, width: 66, height: 66, color: PALE_BLUE, borderColor: LIGHT, borderWidth: 1 });
+    drawText(page, "C", MARGIN + 23, y - 16, 27, bold, BLUE);
+    logoBottom = y - 66;
   }
 
-  const brandX = MARGIN + (logo ? 68 : 0);
-  text(page, companyName, brandX, y - 1, 11, bold);
-  const contactLine = [companyEmail, companyPhone].filter(Boolean).join(" | ");
-  text(page, contactLine, brandX, y - 18, 9.5, regular);
-
-  const metaRight = PAGE_W - MARGIN;
-  const invoiceLabel = `Invoice #${number}`;
-  drawRight(invoiceLabel, metaRight, y - 1, 10.5, bold);
-  const issueDate = formatDate(invoice.invoice_date || invoice.issue_date || invoice.issued_at);
-  if (issueDate) {
-    drawRight("Issue date", metaRight, y - 30, 9.5, bold);
-    drawRight(issueDate, metaRight, y - 47, 9.5, regular);
+  const brandX = MARGIN;
+  const brandNameTop = logoBottom - 10;
+  drawText(page, companyName, brandX, brandNameTop, 16, bold, BLUE);
+  drawText(page, "Professional Cleaning Services", brandX, brandNameTop - 20, 8.2, bold, MUTED);
+  drawText(page, `Operated by ${legalName}`, brandX, brandNameTop - 39, 8.3, bold, TEXT);
+  let companyY = brandNameTop - 53;
+  for (const line of companyAddress) {
+    drawText(page, line, brandX, companyY, 8.2, regular, MUTED);
+    companyY -= 11;
   }
+  drawText(page, `${companyPhone} | ${companyEmail} | ${companyWebsite}`, brandX, companyY, 8.2, regular, MUTED);
 
-  y -= 86;
-  page.drawRectangle({ x: MARGIN, y: y, width: CONTENT_W, height: 5, color: RULE });
-  y -= 38;
-  text(page, `Invoice #${number}`, MARGIN, y, 25, bold);
-  y -= 48;
-
-  // Three-column summary with the short top rules from the supplied reference.
-  const gap = 10;
-  const colW = (CONTENT_W - gap * 2) / 3;
-  const col1 = MARGIN;
-  const col2 = MARGIN + colW + gap;
-  const col3 = MARGIN + (colW + gap) * 2;
-  line(page, col1, y, col1 + colW);
-  line(page, col2, y, col2 + colW);
-  line(page, col3, y, col3 + colW);
-
-  const summaryHeadingTop = y - 17;
-  text(page, "Customer", col1, summaryHeadingTop, 10.5, bold);
-  text(page, "Invoice Details", col2, summaryHeadingTop, 10.5, bold);
-  text(page, "Payment", col3, summaryHeadingTop, 10.5, bold);
-
-  const customerLines = [
-    customer?.display_name || "Customer",
-    customer?.email,
-    customer?.phone,
-    ...addressLines(address),
-    showServiceAddress ? "Service address" : null,
-    ...(showServiceAddress ? addressLines(serviceAddress) : []),
-  ].filter(Boolean) as string[];
-  const detailLines = [
-    `PDF created ${formatDate(new Date().toISOString(), true)}`,
-    money(total),
+  drawRight(page, "INVOICE", PAGE_W - MARGIN, y + 1, 29, bold, NAVY);
+  const metaX = PAGE_W - MARGIN - 182;
+  const metaW = 182;
+  const metaTop = y - 37;
+  page.drawRectangle({ x: metaX, y: metaTop - 76, width: metaW, height: 76, color: PALE_BLUE, borderColor: LIGHT, borderWidth: 1 });
+  const metaRows: Array<[string, string]> = [
+    ["Invoice #", number],
+    ["Invoice Date", formatDate(invoice.invoice_date || invoice.issue_date || invoice.issued_at) || "—"],
+    ["Due Date", formatDate(invoice.due_date) || "—"],
+    ["Status", status],
   ];
-  const dueDate = formatDate(invoice.due_date, true);
-  const paymentLines = [dueDate ? `Due ${dueDate}` : "No due date", fullyPaid ? money(paid) : money(balance)];
+  metaRows.forEach(([label, value], index) => {
+    const rowTop = metaTop - 8 - index * 18;
+    drawText(page, label, metaX + 10, rowTop, 8.2, regular, MUTED);
+    drawRight(page, value, metaX + metaW - 10, rowTop, 8.4, bold, status === "CANCELLED" ? RED : NAVY);
+  });
 
-  const summaryBodyTop = summaryHeadingTop - 18;
-  const drawSummaryLines = (lines: string[], x: number, maxWidth: number) => {
-    let offset = 0;
-    lines.forEach((value) => {
-      const wrapped = wrap(regular, value, 9.5, maxWidth);
-      wrapped.forEach((part) => {
-        text(page, part, x, summaryBodyTop - offset, 9.5, regular);
-        offset += 13;
-      });
-    });
-    return offset;
-  };
+  y -= 170;
+  page.drawRectangle({ x: MARGIN, y: y, width: CONTENT_W, height: 4, color: BLUE });
+  y -= 24;
 
-  const customerH = drawSummaryLines(customerLines, col1, colW - 4);
-  const detailH = drawSummaryLines(detailLines, col2, colW - 4);
-  const paymentH = drawSummaryLines(paymentLines, col3, colW - 4);
-  y = summaryBodyTop - Math.max(customerH, detailH, paymentH) - 18;
+  // Bill to + service address
+  const gap = 16;
+  const boxW = (CONTENT_W - gap) / 2;
+  const leftX = MARGIN;
+  const rightX = MARGIN + boxW + gap;
+  const boxH = 112;
+  page.drawRectangle({ x: leftX, y: y - boxH, width: boxW, height: boxH, borderColor: LIGHT, borderWidth: 1 });
+  page.drawRectangle({ x: rightX, y: y - boxH, width: boxW, height: boxH, borderColor: LIGHT, borderWidth: 1 });
+  drawText(page, "BILL TO", leftX + 12, y - 12, 8.5, bold, BLUE);
+  drawText(page, customer?.display_name || "Customer", leftX + 12, y - 31, 10.5, bold, NAVY);
+  let ly = y - 48;
+  for (const value of [customer?.email, customer?.phone, ...addressLines(billingAddress)].filter(Boolean) as string[]) {
+    const lines = wrap(regular, value, 8.6, boxW - 24);
+    for (const line of lines) {
+      drawText(page, line, leftX + 12, ly, 8.6, regular, MUTED);
+      ly -= 11;
+    }
+  }
 
+  drawText(page, "SERVICE ADDRESS", rightX + 12, y - 12, 8.5, bold, BLUE);
+  let ry = y - 31;
+  const serviceLines = addressLines(serviceAddress);
+  if (!serviceLines.length) serviceLines.push("Not provided");
+  for (const value of serviceLines) {
+    const lines = wrap(regular, value, 8.6, boxW - 24);
+    for (const line of lines) {
+      drawText(page, line, rightX + 12, ry, 8.6, regular, MUTED);
+      ry -= 11;
+    }
+  }
+  ry -= 4;
+  drawText(page, `Service Date: ${formatDate(invoice.service_date) || "—"}`, rightX + 12, ry, 8.5, bold, TEXT);
+  ry -= 13;
+  for (const line of wrap(bold, `Service Type: ${serviceType}`, 8.5, boxW - 24)) {
+    drawText(page, line, rightX + 12, ry, 8.5, bold, TEXT);
+    ry -= 11;
+  }
+
+  y -= boxH + 26;
+
+  // Items table header
+  ensure(50);
   const qtyRight = 398;
-  const priceRight = 484;
+  const rateRight = 482;
   const amountRight = PAGE_W - MARGIN;
-
-  line(page, MARGIN, y, PAGE_W - MARGIN);
-  const tableHeadTop = y - 17;
-  text(page, "Items", MARGIN, tableHeadTop, 10.5, bold);
-  drawRight("Quantity", qtyRight, tableHeadTop, 10.5, bold);
-  drawRight("Price", priceRight, tableHeadTop, 10.5, bold);
-  drawRight("Amount", amountRight, tableHeadTop, 10.5, bold);
-  y -= 34;
-  line(page, MARGIN, y, PAGE_W - MARGIN);
-  y -= 17;
+  page.drawRectangle({ x: MARGIN, y: y - 22, width: CONTENT_W, height: 22, color: BLUE });
+  drawText(page, "SERVICE / DESCRIPTION", MARGIN + 8, y - 6, 8.2, bold, WHITE);
+  drawRight(page, "QTY", qtyRight, y - 6, 8.2, bold, WHITE);
+  drawRight(page, "RATE", rateRight, y - 6, 8.2, bold, WHITE);
+  drawRight(page, "AMOUNT", amountRight - 6, y - 6, 8.2, bold, WHITE);
+  y -= 32;
 
   if (!items.length) {
-    text(page, "No line items", MARGIN, y, 10, regular, MUTED);
+    drawText(page, "No line items", MARGIN + 8, y, 9, regular, MUTED);
     y -= 24;
-    line(page, MARGIN, y, PAGE_W - MARGIN);
+    drawLine(page, y);
+    y -= 12;
   }
 
   for (const item of items) {
     const lineTotal = item.line_total_cents ?? (item.quantity || 0) * (item.unit_cents || 0);
-    const description = item.details ? `${item.description} - ${item.details}` : item.description;
-    const descLines = wrap(regular, description, 10, qtyRight - MARGIN - 48);
-    const rowHeight = Math.max(34, descLines.length * 13 + 12);
-    ensure(rowHeight + 10);
-
-    descLines.forEach((lineText, index) => text(page, lineText, MARGIN, y - index * 13, 10, regular));
-    drawRight(formatQuantity(item.quantity), qtyRight, y, 10, regular);
-    drawRight(money(item.unit_cents), priceRight, y, 10, regular);
-    drawRight(money(lineTotal), amountRight, y, 10, regular);
+    const description = item.details ? `${item.description} — ${item.details}` : item.description;
+    const descLines = wrap(regular, description, 9.2, qtyRight - MARGIN - 54);
+    const rowHeight = Math.max(32, descLines.length * 12 + 10);
+    ensure(rowHeight + 12);
+    descLines.forEach((line, index) => drawText(page, line, MARGIN + 8, y - index * 12, 9.2, index === 0 ? bold : regular, TEXT));
+    drawRight(page, formatQuantity(item.quantity), qtyRight, y, 9.2, regular, TEXT);
+    drawRight(page, money(item.unit_cents), rateRight, y, 9.2, regular, TEXT);
+    drawRight(page, money(lineTotal), amountRight - 6, y, 9.2, bold, NAVY);
     y -= rowHeight;
-    line(page, MARGIN, y, PAGE_W - MARGIN);
-    y -= 16;
+    drawLine(page, y);
+    y -= 10;
   }
 
-  const totals: Array<{ label: string; value: string; strong?: boolean }> = [
-    { label: "Subtotal", value: money(invoice.subtotal_cents) },
+  // Notes + totals
+  ensure(180);
+  const totalsW = 218;
+  const notesW = CONTENT_W - totalsW - 24;
+  const totalsX = PAGE_W - MARGIN - totalsW;
+  const blockTop = y;
+
+  drawText(page, "SERVICE NOTES", MARGIN, blockTop, 8.5, bold, BLUE);
+  let notesY = blockTop - 18;
+  const notesText = invoice.notes || "No additional service notes.";
+  for (const line of wrap(regular, notesText, 8.8, notesW)) {
+    drawText(page, line, MARGIN, notesY, 8.8, regular, MUTED);
+    notesY -= 12;
+  }
+  notesY -= 8;
+  drawText(page, "Thank you for choosing Camz Cleaning.", MARGIN, notesY, 8.8, bold, BLUE);
+
+  const totals: Array<[string, string, "normal" | "grand" | "balance"]> = [
+    ["Subtotal", money(invoice.subtotal_cents), "normal"],
   ];
   if (discount > 0) {
-    totals.push({
-      label: `Discount${discountReason ? ` - ${discountReason}` : ""}`,
-      value: `-${money(discount)}`,
-    });
+    totals.push([`Discount${discountReason ? ` · ${discountReason}` : ""}`, `-${money(discount)}`, "normal"]);
   }
-  if (tax > 0) {
-    totals.push({
-      label: `GST${invoice.tax_rate_bps ? ` (${Number(invoice.tax_rate_bps) / 100}%)` : ""}`,
-      value: money(tax),
-    });
+  if (invoice.tax_enabled !== false && tax > 0) {
+    totals.push([`GST / Tax${invoice.tax_rate_bps ? ` (${Number(invoice.tax_rate_bps) / 100}%)` : ""}`, money(tax), "normal"]);
   }
-  totals.push({ label: fullyPaid ? "Total Paid" : "Total", value: money(fullyPaid ? paid : total), strong: true });
-  if (!fullyPaid) {
-    totals.push({ label: "Amount paid", value: money(paid) });
-    totals.push({ label: "Balance due", value: money(balance), strong: true });
-  }
+  totals.push(["TOTAL", money(total), "grand"]);
+  totals.push(["Amount Paid", money(paid), "normal"]);
+  totals.push(["BALANCE DUE", money(balance), "balance"]);
 
-  for (const row of totals) {
-    const rowHeight = row.strong ? 43 : 30;
-    ensure(rowHeight + 8);
-    const size = row.strong ? 18 : 10.5;
-    const font = row.strong ? bold : regular;
-    const top = y;
-    text(page, row.label, MARGIN, top, size, font);
-    drawRight(row.value, amountRight, top, size, font);
-    y -= rowHeight;
-    line(page, MARGIN, y, PAGE_W - MARGIN);
-    y -= row.strong ? 16 : 12;
+  let totalsY = blockTop;
+  for (const [label, value, kind] of totals) {
+    const h = kind === "normal" ? 22 : 28;
+    const bg = kind === "balance" ? BLUE : kind === "grand" ? PALE_BLUE : WHITE;
+    page.drawRectangle({ x: totalsX, y: totalsY - h, width: totalsW, height: h, color: bg, borderColor: LIGHT, borderWidth: 1 });
+    const size = kind === "normal" ? 8.5 : 10.5;
+    const color = kind === "balance" ? WHITE : TEXT;
+    drawText(page, label, totalsX + 9, totalsY - 6, size, kind === "normal" ? regular : bold, color);
+    drawRight(page, value, totalsX + totalsW - 9, totalsY - 6, size, bold, color);
+    totalsY -= h;
   }
+  y = Math.min(notesY - 18, totalsY - 18);
 
-  if (payments.length) {
-    ensure(50);
-    text(page, "Payments", MARGIN, y, 10.5, bold);
-    y -= 18;
-    for (const payment of payments) {
-      const label = `${formatDate(payment.received_at)} (${paymentLabel(payment.method)})`;
-      ensure(28);
-      text(page, label, MARGIN, y, 10, regular);
-      drawRight(money(payment.amount_cents), amountRight, y, 10, regular);
-      y -= 15;
-      if (payment.notes) {
-        const noteLines = wrap(regular, payment.notes, 9.5, CONTENT_W - 90);
-        for (const note of noteLines) {
-          ensure(13);
-          text(page, note, MARGIN, y, 9.5, regular);
-          y -= 12;
-        }
-      }
-    }
+  // E-transfer box
+  ensure(94);
+  const transferBody =
+    company.e_transfer_instructions ||
+    `Send e-transfer to: ${companyEmail}\nPlease include the invoice number and customer name in the transfer message.\nPayment is recorded manually after the e-transfer is received.`;
+  const transferLines = transferBody.split(/\n+/).flatMap((line) => wrap(regular, line, 8.6, CONTENT_W - 32));
+  const transferH = 32 + transferLines.length * 12;
+  page.drawRectangle({ x: MARGIN, y: y - transferH, width: CONTENT_W, height: transferH, color: PALE_BLUE, borderColor: rgb(0.72, 0.84, 0.96), borderWidth: 1 });
+  page.drawRectangle({ x: MARGIN, y: y - transferH, width: 4, height: transferH, color: BLUE });
+  drawText(page, "PAY BY E-TRANSFER", MARGIN + 14, y - 10, 8.5, bold, BLUE);
+  let transferY = y - 28;
+  for (const line of transferLines) {
+    drawText(page, line, MARGIN + 14, transferY, 8.6, regular, TEXT);
+    transferY -= 12;
   }
+  y -= transferH + 16;
 
-  const notes = [
-    invoice.notes ? { title: "Notes", body: invoice.notes } : null,
-    company.e_transfer_instructions ? { title: "E-transfer", body: company.e_transfer_instructions } : null,
-    company.invoice_footer_text ? { title: "", body: company.invoice_footer_text } : null,
-  ].filter(Boolean) as Array<{ title: string; body: string }>;
-
-  for (const note of notes) {
-    ensure(44);
-    y -= 10;
-    if (note.title) {
-      text(page, note.title, MARGIN, y, 10.5, bold);
-      y -= 16;
-    }
-    for (const noteLine of wrap(regular, note.body, 9.5, CONTENT_W)) {
-      ensure(14);
-      text(page, noteLine, MARGIN, y, 9.5, regular, MUTED);
-      y -= 13;
+  if (company.invoice_footer_text) {
+    ensure(30);
+    for (const line of wrap(regular, company.invoice_footer_text, 8.2, CONTENT_W)) {
+      drawText(page, line, MARGIN, y, 8.2, regular, MUTED);
+      y -= 11;
     }
   }
 
   if (invoice.is_void) {
     ensure(42);
-    const label = "VOID";
-    const size = 36;
+    const label = "CANCELLED";
+    const size = 28;
     const width = bold.widthOfTextAtSize(label, size);
-    text(page, label, (PAGE_W - width) / 2, y - 8, size, bold, VOID_RED);
+    drawText(page, label, (PAGE_W - width) / 2, y - 4, size, bold, RED);
   }
 
-  // Footer and page numbering are added after all pages exist.
   const pages = doc.getPages();
   pages.forEach((pdfPage, index) => {
-    const footerY = 39;
+    const footerY = 28;
+    pdfPage.drawLine({ start: { x: MARGIN, y: footerY + 13 }, end: { x: PAGE_W - MARGIN, y: footerY + 13 }, thickness: 0.7, color: LIGHT });
+    pdfPage.drawText(`${companyName} | Calgary, Alberta | ${companyPhone} | ${companyWebsite}`, {
+      x: MARGIN,
+      y: footerY,
+      size: 7.5,
+      font: regular,
+      color: MUTED,
+    });
     const pageText = `Page ${index + 1} of ${pages.length}`;
     pdfPage.drawText(pageText, {
-      x: PAGE_W - MARGIN - regular.widthOfTextAtSize(pageText, 9),
+      x: PAGE_W - MARGIN - regular.widthOfTextAtSize(pageText, 7.5),
       y: footerY,
-      size: 9,
+      size: 7.5,
       font: regular,
-      color: RULE,
+      color: MUTED,
     });
-
   });
 
   doc.setTitle(`Invoice ${number}`);
