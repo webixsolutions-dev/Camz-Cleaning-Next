@@ -26,6 +26,10 @@ export type ServicePricingConfig = {
   name: string;
   enabled: boolean;
   startingPriceCents: number;
+  customScope: {
+    enabled: boolean;
+    minimumChargeCents: number;
+  };
   packages: PricingPackage[];
   additionalCharges: PricingAreaValues;
   includedItems: string[];
@@ -133,6 +137,7 @@ export const DEFAULT_CLEANING_PRICING_CONFIG: CleaningPricingConfig = {
       name: "Standard Cleaning",
       enabled: true,
       startingPriceCents: 9900,
+      customScope: { enabled: true, minimumChargeCents: 9900 },
       packages: [
         {
           id: "essential_standard",
@@ -192,6 +197,7 @@ export const DEFAULT_CLEANING_PRICING_CONFIG: CleaningPricingConfig = {
       name: "Deep Cleaning",
       enabled: true,
       startingPriceCents: 15900,
+      customScope: { enabled: true, minimumChargeCents: 15900 },
       packages: [
         {
           id: "deep_1bed_1bath",
@@ -245,6 +251,7 @@ export const DEFAULT_CLEANING_PRICING_CONFIG: CleaningPricingConfig = {
       name: "Move-In / Move-Out Cleaning",
       enabled: true,
       startingPriceCents: 19900,
+      customScope: { enabled: true, minimumChargeCents: 19900 },
       packages: [
         {
           id: "move_studio_1bed_1bath",
@@ -379,7 +386,28 @@ const isWholeNonNegative = (value: unknown) =>
 
 export function validatePricingConfig(input: unknown): { ok: true; config: CleaningPricingConfig } | { ok: false; error: string } {
   if (!input || typeof input !== "object") return { ok: false, error: "Pricing config is required." };
-  const config = input as CleaningPricingConfig;
+  const config = JSON.parse(JSON.stringify(input)) as CleaningPricingConfig;
+
+  // Backward compatibility for existing Phase 1 pricing rows. Older stored
+  // configs do not have customScope yet, so derive the initial minimum from the
+  // service starting price without making the public pricing API unavailable.
+  const legacyServiceKeys: PricingServiceKey[] = ["standard", "deep", "move_in_out"];
+  for (const serviceKey of legacyServiceKeys) {
+    const service = config.services?.[serviceKey];
+    if (!service) continue;
+    if (!service.customScope || typeof service.customScope !== "object") {
+      service.customScope = {
+        enabled: true,
+        minimumChargeCents: Math.max(0, Number(service.startingPriceCents) || 0),
+      };
+    } else {
+      if (typeof service.customScope.enabled !== "boolean") service.customScope.enabled = true;
+      if (!Number.isFinite(Number(service.customScope.minimumChargeCents))) {
+        service.customScope.minimumChargeCents = Math.max(0, Number(service.startingPriceCents) || 0);
+      }
+    }
+  }
+
   if (config.schemaVersion !== 1) return { ok: false, error: "Unsupported pricing config version." };
   if (config.currency !== "CAD") return { ok: false, error: "Currency must be CAD." };
   if (!config.tax || typeof config.tax !== "object") return { ok: false, error: "Tax settings are required." };
@@ -395,6 +423,8 @@ export function validatePricingConfig(input: unknown): { ok: true; config: Clean
     const service = config.services?.[serviceKey];
     if (!service) return { ok: false, error: `Missing ${serviceKey} pricing.` };
     if (!isFiniteNonNegative(service.startingPriceCents)) return { ok: false, error: `${service.name} starting price is invalid.` };
+    if (!service.customScope || typeof service.customScope.enabled !== "boolean") return { ok: false, error: `${service.name} custom-scope settings are invalid.` };
+    if (!isFiniteNonNegative(service.customScope.minimumChargeCents)) return { ok: false, error: `${service.name} custom minimum charge is invalid.` };
     if (!Array.isArray(service.packages) || service.packages.length === 0) return { ok: false, error: `${service.name} needs at least one package.` };
     for (const pkg of service.packages) {
       if (!pkg.id?.trim() || !pkg.name?.trim()) return { ok: false, error: `${service.name} contains an unnamed package.` };

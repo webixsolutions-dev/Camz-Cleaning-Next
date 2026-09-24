@@ -1,10 +1,44 @@
 import type {
   AddOnPricing,
   CleaningPricingConfig,
+  PricingAreaValues,
   PricingScope,
 } from "@/lib/pricing/config";
 
 export type AddOnSelection = Record<string, number | boolean | string | null | undefined>;
+
+export type AddOnVisibilityContext = {
+  bookingMode?: "package" | "custom";
+  selectedAreas?: Partial<PricingAreaValues>;
+};
+
+const CUSTOM_AREA_RELATED_ADDONS: Partial<Record<string, keyof PricingAreaValues | "any_area">> = {
+  inside_microwave: "kitchens",
+  inside_fridge: "kitchens",
+  inside_oven: "kitchens",
+  inside_empty_cabinets: "kitchens",
+  baseboards: "any_area",
+};
+
+const hasSelectedCustomArea = (
+  selectedAreas: Partial<PricingAreaValues> | undefined,
+  key: keyof PricingAreaValues | "any_area" | undefined,
+) => {
+  if (!selectedAreas || !key) return false;
+  if (key === "any_area") {
+    const areaKeys: Array<keyof PricingAreaValues> = [
+      "bedrooms",
+      "fullBathrooms",
+      "halfBathrooms",
+      "kitchens",
+      "livingRooms",
+      "finishedBasement",
+      "stairFlights",
+    ];
+    return areaKeys.some((areaKey) => Number(selectedAreas[areaKey] || 0) > 0);
+  }
+  return Number(selectedAreas[key] || 0) > 0;
+};
 
 export type AddOnLineItem = {
   id: string;
@@ -58,16 +92,41 @@ const clampQuantity = (value: unknown, maxQuantity = DEFAULT_MAX_ADDON_QUANTITY)
 export function getVisibleAddOns(
   config: CleaningPricingConfig,
   scope: PricingScope,
+  context?: AddOnVisibilityContext,
 ) {
   const serviceIncludedItems =
     scope === "carpet" ? [] : config.services[scope].includedItems;
+  const customMode = context?.bookingMode === "custom" && scope !== "carpet";
 
   return config.addOns.filter((addOn) => {
     if (!addOn.active) return false;
-    if (!addOn.availableFor.includes(scope)) return false;
-    if (addOn.includedFor.includes(scope)) return false;
-    if (serviceIncludedItems.includes(addOn.id)) return false;
-    return true;
+
+    if (!customMode) {
+      if (!addOn.availableFor.includes(scope)) return false;
+      if (addOn.includedFor.includes(scope)) return false;
+      if (serviceIncludedItems.includes(addOn.id)) return false;
+      return true;
+    }
+
+    // In custom mode an included task is only considered included when the
+    // related area is actually selected. If the area count is zero, an
+    // otherwise-included task may be purchased independently as an add-on.
+    const relatedArea = CUSTOM_AREA_RELATED_ADDONS[addOn.id];
+    const includedByService =
+      addOn.includedFor.includes(scope) || serviceIncludedItems.includes(addOn.id);
+    const includedBySelectedScope = includedByService
+      ? relatedArea
+        ? hasSelectedCustomArea(context?.selectedAreas, relatedArea)
+        : Object.values(context?.selectedAreas || {}).some((value) => Number(value) > 0)
+      : false;
+
+    if (includedBySelectedScope) return false;
+
+    return (
+      addOn.availableFor.includes(scope) ||
+      addOn.includedFor.includes(scope) ||
+      serviceIncludedItems.includes(addOn.id)
+    );
   });
 }
 
@@ -75,8 +134,9 @@ export function calculateServiceAddOns(
   config: CleaningPricingConfig,
   scope: PricingScope,
   selection: AddOnSelection | null | undefined,
+  context?: AddOnVisibilityContext,
 ): AddOnPricingResult {
-  const visibleAddOns = getVisibleAddOns(config, scope);
+  const visibleAddOns = getVisibleAddOns(config, scope, context);
   const normalizedSelection = selection || {};
   const lineItems: AddOnLineItem[] = [];
   const selectedAddOnIds: string[] = [];

@@ -695,10 +695,48 @@ export default function BookingsManagement({
                       <DetailMini label="Property type" value={String(selectedBooking.service_data.propertyType || "Not provided").replaceAll("_", " ")} />
                       <DetailMini label="Condition" value={String(selectedBooking.service_data.propertyCondition || "Not provided").replaceAll("_", " ")} />
                       <DetailMini label="Postal code" value={selectedBooking.service_data.postalCode || "Not provided"} />
+                      {selectedBooking.service_data.bookingMode && <DetailMini label="Booking mode" value={selectedBooking.service_data.bookingMode === "custom" ? "Build Your Own Scope" : "Prebuilt Package"} />}
                       {selectedBooking.service_data.pricingPackageName && <DetailMini label="Pricing package" value={selectedBooking.service_data.pricingPackageName} />}
+                      {selectedBooking.service_data.bookingMode === "custom" && selectedBooking.service_data.customSelectedAreaSubtotal !== undefined && <DetailMini label="Selected-area subtotal" value={`CAD $${Number(selectedBooking.service_data.customSelectedAreaSubtotal || 0).toFixed(2)}`} />}
+                      {selectedBooking.service_data.bookingMode === "custom" && selectedBooking.service_data.customMinimumCharge !== undefined && <DetailMini label="Custom minimum" value={`CAD $${Number(selectedBooking.service_data.customMinimumCharge || 0).toFixed(2)}`} />}
+                      {selectedBooking.service_data.bookingMode === "custom" && selectedBooking.service_data.customMinimumAdjustment !== undefined && <DetailMini label="Minimum adjustment" value={`CAD $${Number(selectedBooking.service_data.customMinimumAdjustment || 0).toFixed(2)}`} />}
                       {selectedBooking.service_data.movePropertyEmpty !== undefined && <DetailMini label="Property empty" value={selectedBooking.service_data.movePropertyEmpty ? "Yes" : "No"} />}
                       {selectedBooking.service_data.calculatedTotal !== undefined && <DetailMini label="Calculated total" value={`CAD $${Number(selectedBooking.service_data.calculatedTotal || 0).toFixed(2)}`} />}
                     </div>
+
+                    {selectedBooking.service_data.bookingMode === "custom" && Array.isArray(selectedBooking.service_data.customScope) && (
+                      <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="text-[8px] font-extrabold uppercase text-slate-400">Custom selected scope</div>
+                        {selectedBooking.service_data.customScope.length ? (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {selectedBooking.service_data.customScope.map((area: any) => (
+                              <div key={String(area.key)} className="rounded-lg bg-slate-50 px-2.5 py-2 text-[10px] font-semibold text-slate-700">
+                                {Number(area.quantity || 0)} × {String(area.label || area.key)}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-[10px] text-slate-500">No room/area quantities selected; service minimum applied.</div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedBooking.service_data.bookingMode === "custom" && Array.isArray(selectedBooking.service_data.pricingBreakdown) && (
+                      <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="text-[8px] font-extrabold uppercase text-slate-400">Custom pricing calculation</div>
+                        <div className="mt-2 space-y-1.5">
+                          {selectedBooking.service_data.pricingBreakdown.map((item: any, index: number) => (
+                            <div key={`${String(item.key || item.label)}-${index}`} className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 px-2.5 py-2 text-[10px]">
+                              <span className="min-w-0 text-slate-600">
+                                {String(item.label || item.key || "Pricing item")}
+                                {Number(item.quantity || 0) > 1 ? ` × ${Number(item.quantity)}` : ""}
+                              </span>
+                              <span className="shrink-0 font-extrabold text-slate-800">CAD ${Number(item.amount || 0).toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {selectedBooking.service_data.additionalInstructions && (
                       <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">

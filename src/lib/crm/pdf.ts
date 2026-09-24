@@ -25,8 +25,6 @@ export type InvoiceLike = {
   is_void?: boolean;
   invoice_date?: string | null;
   service_date?: string | null;
-  service_type?: string | null;
-  service_name?: string | null;
   issue_date?: string | null;
   issued_at?: string | null;
   due_date?: string | null;
@@ -125,20 +123,20 @@ function formatQuantity(value: unknown) {
   return String(Math.max(0, Math.round(quantity)));
 }
 
-function formatDate(value?: string | null) {
+function formatDate(value?: string | null, long = false) {
   if (!value) return "";
   const date = new Date(value.includes("T") ? value : `${value}T12:00:00`);
   if (Number.isNaN(date.getTime())) return escapeHtml(value);
-  return new Intl.DateTimeFormat("en-US", {
-    month: "2-digit",
-    day: "2-digit",
+  return date.toLocaleDateString("en-US", {
+    month: long ? "long" : "short",
+    day: "numeric",
     year: "numeric",
-  }).format(date);
+  });
 }
 
 function paymentLabel(method?: string | null) {
   const key = String(method || "").toLowerCase();
-  if (key === "e_transfer") return "E-transfer";
+  if (key === "e_transfer") return "Transfer";
   if (key === "card") return "Card";
   if (key === "cash") return "Cash";
   if (key === "cheque") return "Cheque";
@@ -159,52 +157,20 @@ function addressLines(address?: InvoiceAddress | null) {
   ].filter(Boolean) as string[];
 }
 
-function displayStatus(invoice: InvoiceLike) {
-  if (invoice.is_void) return "CANCELLED";
-  const status = String(invoice.status || "draft").toLowerCase();
-  if (status === "draft") return "DRAFT";
-  if (status === "issued" || status === "overdue") return "UNPAID";
-  if (status === "partially_paid") return "PARTIALLY PAID";
-  if (status === "paid") return "PAID";
-  if (status === "void" || status === "cancelled") return "CANCELLED";
-  return status.replaceAll("_", " ").toUpperCase();
-}
-
-function statusClass(status: string) {
-  if (status === "PAID") return "status paid";
-  if (status === "PARTIALLY PAID") return "status partial";
-  if (status === "CANCELLED") return "status cancelled";
-  if (status === "DRAFT") return "status draft";
-  return "status unpaid";
-}
-
 function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: string) {
   const number = invoice.invoice_number || "DRAFT";
-  const companyName = company.trade_name || "Camz Cleaning";
-  const legalName = company.legal_name || "Camzio Professional Services Inc.";
+  const companyName = company.trade_name || company.legal_name || "Camz Cleaning";
   const companyEmail = company.email || "info@camzcleaning.com";
-  const companyPhone = company.phone || "587-837-1977";
-  const companyWebsite = company.website || "www.camzcleaning.com";
-  const companyAddress = [
-    company.address_line1 || "4 Saddlecreek Terrace NE",
-    company.address_line2,
-    [company.city || "Calgary", company.province || "AB", company.postal_code || "T3J 4A5"]
-      .filter(Boolean)
-      .join(" "),
-  ].filter(Boolean) as string[];
-
+  const companyPhone = company.phone || "(587) 837-1977";
   const customer = invoice.crm_customers;
-  const billingAddress = invoice.billing_address || customer?.crm_customer_addresses?.[0] || null;
-  const serviceAddress = invoice.service_address || billingAddress || null;
+  const address = invoice.billing_address || customer?.crm_customer_addresses?.[0] || null;
+  const serviceAddress = invoice.service_address || null;
+  const showServiceAddress =
+    serviceAddress && addressLines(serviceAddress).join("|") !== addressLines(address).join("|");
   const issueDate = formatDate(invoice.invoice_date || invoice.issue_date || invoice.issued_at);
-  const dueDate = formatDate(invoice.due_date);
-  const serviceDate = formatDate(invoice.service_date);
+  const dueDate = formatDate(invoice.due_date, true);
+  const created = formatDate(new Date().toISOString(), true);
   const items = invoice.crm_invoice_items || [];
-  const serviceType =
-    invoice.service_type ||
-    invoice.service_name ||
-    items[0]?.description ||
-    "Cleaning Service";
   const payments = (invoice.crm_payments || []).filter((row) => !row.is_void);
   const paid = Number(invoice.amount_paid_cents || 0);
   const total = Number(invoice.total_cents || 0);
@@ -212,17 +178,17 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
   const discount = Number(invoice.discount_cents || 0);
   const discountReason = publicDiscountReason(invoice.discount_reason);
   const balance = Number(invoice.balance_cents || 0);
-  const status = displayStatus(invoice);
+  const fullyPaid = paid > 0 && balance <= 0 && !invoice.is_void;
 
   const itemRows = items
     .map((item) => {
       const line = item.line_total_cents ?? (item.quantity || 0) * (item.unit_cents || 0);
       const details = item.details ? `<div class="item-detail">${escapeHtml(item.details)}</div>` : "";
       return `<tr>
-        <td><strong>${escapeHtml(item.description)}</strong>${details}</td>
+        <td>${escapeHtml(item.description)}${details}</td>
         <td class="num">${formatQuantity(item.quantity)}</td>
         <td class="num">${formatMoney(item.unit_cents)}</td>
-        <td class="num amount">${formatMoney(line)}</td>
+        <td class="num">${formatMoney(line)}</td>
       </tr>`;
     })
     .join("");
@@ -230,9 +196,10 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
   const paymentRows = payments
     .map((payment) => {
       const extra = payment.notes ? `<div class="payment-note">${escapeHtml(payment.notes)}</div>` : "";
-      return `<div class="payment-row"><span>${formatDate(payment.received_at)} · ${escapeHtml(
-        paymentLabel(payment.method),
-      )}${extra}</span><strong>${formatMoney(payment.amount_cents)}</strong></div>`;
+      return `<tr>
+        <td>${formatDate(payment.received_at)} (${escapeHtml(paymentLabel(payment.method))})${extra}</td>
+        <td class="num">${formatMoney(payment.amount_cents)}</td>
+      </tr>`;
     })
     .join("");
 
@@ -240,56 +207,46 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
     ? `<img src="${logoSrc}" alt="${escapeHtml(companyName)}" class="logo" />`
     : `<div class="logo-fallback">C</div>`;
 
-  const transferText =
-    company.e_transfer_instructions ||
-    `Send e-transfer to: ${companyEmail}\nPlease include the invoice number and customer name in the transfer message.\nPayment is recorded manually after the e-transfer is received.`;
+  const companyContact = [companyEmail, companyPhone].filter(Boolean).map(escapeHtml).join(" | ");
 
   return `
   <div id="invoice-sheet" class="sheet">
-    <header class="invoice-header">
-      <div class="brand-block">
-        <div class="brand-row">
-          ${logo}
-          <div class="brand-copy">
-            <div class="company-name">${escapeHtml(companyName)}</div>
-            <div class="company-subtitle">Professional Cleaning Services</div>
-          </div>
+    <header class="letterhead">
+      <div class="brand">
+        ${logo}
+        <div class="brand-copy">
+          <div class="company">${escapeHtml(companyName)}</div>
+          <div class="company-contact">${companyContact}</div>
         </div>
-        <div class="operated">Operated by ${escapeHtml(legalName)}</div>
-        ${companyAddress.map((line) => `<div class="company-line">${escapeHtml(line)}</div>`).join("")}
-        <div class="company-line">${escapeHtml(companyPhone)} | ${escapeHtml(companyEmail)} | ${escapeHtml(
-          companyWebsite,
-        )}</div>
       </div>
-
-      <div class="invoice-heading-block">
-        <div class="invoice-word">INVOICE</div>
-        <div class="meta-card">
-          <div><span>Invoice #</span><strong>${escapeHtml(number)}</strong></div>
-          <div><span>Invoice Date</span><strong>${issueDate || "—"}</strong></div>
-          <div><span>Due Date</span><strong>${dueDate || "—"}</strong></div>
-          <div><span>Status</span><strong class="${statusClass(status)}">${escapeHtml(status)}</strong></div>
-        </div>
+      <div class="meta">
+        <div class="invoice-meta">Invoice #${escapeHtml(number)}</div>
+        ${issueDate ? `<div class="issue-label">Issue date</div><div class="issue-date">${issueDate}</div>` : ""}
       </div>
     </header>
 
-    <section class="party-grid">
-      <div class="info-card">
-        <div class="section-label">BILL TO</div>
-        <div class="primary-value">${escapeHtml(customer?.display_name || "Customer")}</div>
-        ${customer?.email ? `<div>${escapeHtml(customer.email)}</div>` : ""}
-        ${customer?.phone ? `<div>${escapeHtml(customer.phone)}</div>` : ""}
-        ${addressLines(billingAddress).map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
+    <div class="rule"></div>
+
+    <h1>Invoice #${escapeHtml(number)}</h1>
+
+    <section class="summary">
+      <div class="summary-card">
+        <h3>Customer</h3>
+        <p>${escapeHtml(customer?.display_name || "Customer")}</p>
+        ${customer?.email ? `<p>${escapeHtml(customer.email)}</p>` : ""}
+        ${customer?.phone ? `<p>${escapeHtml(customer.phone)}</p>` : ""}
+        ${addressLines(address).map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
+        ${showServiceAddress ? `<p class="small-label">Service address</p>${addressLines(serviceAddress).map((line) => `<p>${escapeHtml(line)}</p>`).join("")}` : ""}
       </div>
-      <div class="info-card">
-        <div class="section-label">SERVICE ADDRESS</div>
-        ${
-          addressLines(serviceAddress).length
-            ? addressLines(serviceAddress).map((line) => `<div>${escapeHtml(line)}</div>`).join("")
-            : `<div class="muted">Not provided</div>`
-        }
-        <div class="job-detail"><span>Service Date:</span><strong>${serviceDate || "—"}</strong></div>
-        <div class="job-detail"><span>Service Type:</span><strong>${escapeHtml(serviceType)}</strong></div>
+      <div class="summary-card">
+        <h3>Invoice Details</h3>
+        <p>PDF created ${created}</p>
+        <p>${formatMoney(total)}</p>
+      </div>
+      <div class="summary-card">
+        <h3>Payment</h3>
+        <p>${dueDate ? `Due ${dueDate}` : "No due date"}</p>
+        <p>${fullyPaid ? formatMoney(paid) : formatMoney(balance)}</p>
       </div>
     </section>
 
@@ -297,61 +254,46 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
       <table class="items">
         <thead>
           <tr>
-            <th>SERVICE / DESCRIPTION</th>
-            <th class="num">QTY</th>
-            <th class="num">RATE</th>
-            <th class="num">AMOUNT</th>
+            <th>Items</th>
+            <th class="num">Quantity</th>
+            <th class="num">Price</th>
+            <th class="num">Amount</th>
           </tr>
         </thead>
-        <tbody>${itemRows || `<tr><td colspan="4" class="muted">No line items</td></tr>`}</tbody>
+        <tbody>
+          ${itemRows || `<tr><td colspan="4">No line items</td></tr>`}
+          <tr class="subtotal">
+            <td colspan="3">Subtotal</td>
+            <td class="num">${formatMoney(invoice.subtotal_cents)}</td>
+          </tr>
+          ${discount > 0 ? `<tr class="subtotal"><td colspan="3">Discount${discountReason ? ` - ${escapeHtml(discountReason)}` : ""}</td><td class="num">-${formatMoney(discount)}</td></tr>` : ""}
+          ${tax > 0 ? `<tr class="subtotal"><td colspan="3">GST${invoice.tax_rate_bps ? ` (${escapeHtml(Number(invoice.tax_rate_bps) / 100)}%)` : ""}</td><td class="num">${formatMoney(tax)}</td></tr>` : ""}
+          <tr class="total">
+            <td colspan="3">${fullyPaid ? "Total Paid" : "Total"}</td>
+            <td class="num">${formatMoney(fullyPaid ? paid : total)}</td>
+          </tr>
+          ${!fullyPaid ? `<tr class="subtotal"><td colspan="3">Amount paid</td><td class="num">${formatMoney(paid)}</td></tr>
+          <tr class="balance"><td colspan="3">Balance due</td><td class="num">${formatMoney(balance)}</td></tr>` : ""}
+        </tbody>
       </table>
     </div>
 
-    <section class="after-items">
-      <div class="service-notes">
-        <div class="section-label">SERVICE NOTES</div>
-        <div class="note-copy">${invoice.notes ? escapeHtml(invoice.notes) : "No additional service notes."}</div>
-        <div class="thank-you">Thank you for choosing Camz Cleaning.</div>
-      </div>
-      <div class="totals-box">
-        <div class="total-row"><span>Subtotal</span><strong>${formatMoney(invoice.subtotal_cents)}</strong></div>
-        ${
-          discount > 0
-            ? `<div class="total-row"><span>Discount${discountReason ? ` · ${escapeHtml(discountReason)}` : ""}</span><strong>-${formatMoney(
-                discount,
-              )}</strong></div>`
-            : ""
-        }
-        ${
-          invoice.tax_enabled !== false && tax > 0
-            ? `<div class="total-row"><span>GST / Tax${invoice.tax_rate_bps ? ` (${Number(invoice.tax_rate_bps) / 100}%)` : ""}</span><strong>${formatMoney(
-                tax,
-              )}</strong></div>`
-            : ""
-        }
-        <div class="total-row grand"><span>TOTAL</span><strong>${formatMoney(total)}</strong></div>
-        <div class="total-row"><span>Amount Paid</span><strong>${formatMoney(paid)}</strong></div>
-        <div class="total-row balance"><span>BALANCE DUE</span><strong>${formatMoney(balance)}</strong></div>
-      </div>
-    </section>
-
     ${
       paymentRows
-        ? `<section class="payment-history"><div class="section-label">PAYMENTS</div>${paymentRows}</section>`
+        ? `<div class="table-wrap payment-wrap"><table class="payments">
+            <thead><tr><th>Payments</th><th></th></tr></thead>
+            <tbody>${paymentRows}</tbody>
+          </table></div>`
         : ""
     }
 
-    <section class="transfer-box">
-      <div class="section-label">PAY BY E-TRANSFER</div>
-      <div class="transfer-copy">${escapeHtml(transferText).replaceAll("\n", "<br />")}</div>
-    </section>
-
-    ${company.invoice_footer_text ? `<div class="footer-note">${escapeHtml(company.invoice_footer_text)}</div>` : ""}
-    ${invoice.is_void ? `<div class="void">CANCELLED</div>` : ""}
+    ${invoice.notes ? `<div class="notes"><strong>Notes</strong><div>${escapeHtml(invoice.notes)}</div></div>` : ""}
+    ${company.e_transfer_instructions ? `<div class="notes"><strong>E-transfer</strong><div>${escapeHtml(company.e_transfer_instructions)}</div></div>` : ""}
+    ${company.invoice_footer_text ? `<div class="notes footer-note">${escapeHtml(company.invoice_footer_text)}</div>` : ""}
+    ${invoice.is_void ? `<div class="void">VOID</div>` : ""}
 
     <footer class="page-footer">
-      <span>${escapeHtml(companyName)} | Calgary, Alberta | ${escapeHtml(companyPhone)} | ${escapeHtml(companyWebsite)}</span>
-      <span>Page 1 of 1</span>
+      <div class="page-number">Page 1 of 1</div>
     </footer>
   </div>`;
 }
@@ -359,64 +301,112 @@ function invoiceDocument(invoice: InvoiceLike, company: CompanyLike, logoSrc: st
 const invoiceCss = `
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #eef2f6; color: #172033; font-family: Arial, Helvetica, sans-serif; }
+  body {
+    margin: 0;
+    background: #eef2f6;
+    color: #20262d;
+    font-family: Arial, Helvetica, sans-serif;
+  }
   .page { padding: 24px; overflow-x: hidden; }
   .sheet {
-    position: relative; width: min(816px, 100%); min-height: 1056px; margin: 0 auto; background: #fff;
-    padding: 44px 48px 88px; box-shadow: 0 18px 50px rgba(19,38,58,.08); border-top: 7px solid #0f5ca8;
+    position: relative;
+    width: min(816px, 100%);
+    min-height: 1056px;
+    max-width: 100%;
+    margin: 0 auto;
+    background: white;
+    padding: 52px 56px 132px;
+    box-shadow: 0 18px 50px rgba(19,38,58,0.08);
   }
-  .invoice-header { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 34px; align-items: start; }
-  .brand-row { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
-  .logo { width: 168px; height: 82px; object-fit: contain; object-position: left center; display: block; }
-  .logo-fallback { width: 82px; height: 82px; display:flex; align-items:center; justify-content:center; border-radius:16px; background:#eaf4ff; color:#0f5ca8; font-size:30px; font-weight:800; }
-  .brand-copy { padding-left: 1px; }
-  .company-name { font-size: 20px; line-height: 1.15; font-weight: 800; color: #0f5ca8; }
-  .company-subtitle { margin-top: 3px; color: #59677b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
-  .operated { margin-top: 12px; font-size: 11px; font-weight: 700; color: #344054; }
-  .company-line { margin-top: 3px; font-size: 10.5px; color: #59677b; line-height: 1.35; overflow-wrap: anywhere; }
-  .invoice-heading-block { min-width: 0; }
-  .invoice-word { text-align: right; font-size: 34px; font-weight: 900; letter-spacing: .05em; color: #172033; }
-  .meta-card { margin-top: 12px; border: 1px solid #dbe3ec; border-radius: 14px; overflow: hidden; background: #f8fbff; }
-  .meta-card > div { display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:center; padding:8px 12px; border-bottom:1px solid #e7edf4; font-size:10.5px; }
-  .meta-card > div:last-child { border-bottom: 0; }
-  .meta-card span { color:#6b778c; }
-  .meta-card strong { color:#172033; text-align:right; }
-  .status { display:inline-flex; justify-content:center; padding:4px 8px; border-radius:999px; font-size:9px; letter-spacing:.05em; }
-  .status.unpaid { background:#fff4e5; color:#9a5b00; }.status.paid{background:#e9f8ef;color:#167442}.status.partial{background:#fff8db;color:#8a6500}.status.cancelled{background:#feecef;color:#a8253b}.status.draft{background:#eef1f5;color:#596273}
-  .party-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:30px; }
-  .info-card { border:1px solid #dbe3ec; border-radius:14px; padding:16px 18px; min-height:132px; font-size:11px; line-height:1.5; color:#475467; }
-  .section-label { color:#0f5ca8; font-size:10px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; margin-bottom:9px; }
-  .primary-value { color:#172033; font-size:13px; font-weight:800; margin-bottom:4px; }
-  .job-detail { display:flex; justify-content:space-between; gap:16px; margin-top:8px; padding-top:8px; border-top:1px dashed #dbe3ec; }
-  .job-detail span { color:#6b778c; }.job-detail strong { color:#172033; text-align:right; }
-  .muted { color:#98a2b3; }
-  .table-wrap { margin-top:24px; width:100%; overflow-x:auto; }
-  table { width:100%; border-collapse:collapse; }
-  .items { table-layout:fixed; }
-  .items th { padding:10px 9px; background:#0f5ca8; color:white; font-size:9.5px; letter-spacing:.05em; text-align:left; }
-  .items th:first-child,.items td:first-child{width:52%;}.items th:nth-child(2),.items td:nth-child(2){width:10%;}.items th:nth-child(3),.items td:nth-child(3){width:18%;}.items th:nth-child(4),.items td:nth-child(4){width:20%;}
-  .items td { padding:13px 9px; border-bottom:1px solid #e4e9ef; vertical-align:top; font-size:11px; line-height:1.4; color:#344054; }
-  .item-detail { margin-top:3px; font-size:10px; color:#7a8699; white-space:pre-wrap; }
-  .num { text-align:right !important; white-space:nowrap; }.amount{font-weight:800;color:#172033!important;}
-  .after-items { display:grid; grid-template-columns:minmax(0,1fr) 290px; gap:28px; margin-top:24px; align-items:start; }
-  .service-notes { padding-top:4px; font-size:11px; color:#59677b; line-height:1.5; }
-  .note-copy { min-height:45px; white-space:pre-wrap; overflow-wrap:anywhere; }
-  .thank-you { margin-top:16px; color:#0f5ca8; font-weight:700; }
-  .totals-box { border:1px solid #dbe3ec; border-radius:14px; overflow:hidden; }
-  .total-row { display:flex; justify-content:space-between; gap:18px; padding:9px 12px; border-bottom:1px solid #e7edf4; font-size:11px; }
-  .total-row:last-child{border-bottom:0}.total-row span{color:#667085}.total-row strong{color:#172033}.total-row.grand{background:#f3f8fe;font-size:14px;font-weight:900}.total-row.balance{background:#0f5ca8;font-size:15px}.total-row.balance span,.total-row.balance strong{color:#fff;font-weight:900}
-  .payment-history { margin-top:20px; border-top:1px solid #dbe3ec; padding-top:14px; }
-  .payment-row { display:flex; justify-content:space-between; gap:18px; padding:5px 0; font-size:10.5px; color:#59677b; }
-  .payment-note { margin-top:2px; color:#7a8699; }
-  .transfer-box { margin-top:26px; border:1px solid #b8d7f7; border-left:5px solid #0f5ca8; border-radius:14px; padding:15px 18px; background:#f2f8ff; }
-  .transfer-copy { font-size:11px; line-height:1.55; color:#344054; }
-  .footer-note { margin-top:16px; font-size:10px; color:#7a8699; text-align:center; }
-  .void { margin-top:24px; text-align:center; font-size:34px; font-weight:900; letter-spacing:8px; color:#c83349; }
-  .page-footer { position:absolute; left:48px; right:48px; bottom:28px; display:flex; justify-content:space-between; gap:20px; border-top:1px solid #e4e9ef; padding-top:9px; font-size:9px; color:#8a96a8; }
-  @media (max-width:700px) {
-    .page{padding:8px}.sheet{min-height:0;padding:24px 14px 32px}.invoice-header{grid-template-columns:1fr}.invoice-word{text-align:left;margin-top:4px}.meta-card{max-width:100%}.party-grid{grid-template-columns:1fr}.after-items{grid-template-columns:1fr}.logo{width:145px;height:70px}.logo-fallback{width:66px;height:66px}.company-name{font-size:18px}.items th,.items td{padding-left:5px;padding-right:5px;font-size:9.5px}.items th:first-child,.items td:first-child{width:48%}.items th:nth-child(2),.items td:nth-child(2){width:10%}.items th:nth-child(3),.items td:nth-child(3){width:20%}.items th:nth-child(4),.items td:nth-child(4){width:22%}.num{white-space:normal;overflow-wrap:anywhere}.page-footer{position:static;margin-top:36px;flex-direction:column;gap:4px}.transfer-box{margin-bottom:0}
+  .letterhead {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 24px;
+    align-items: start;
   }
-  @media print { @page{size:Letter;margin:0} body{background:#fff}.page{padding:0}.sheet{width:8.5in;min-height:11in;margin:0;box-shadow:none} }
+  .brand { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
+  .brand-copy { min-width: 0; padding-top: 2px; }
+  .logo { width: 62px; height: 62px; object-fit: contain; flex-shrink: 0; border-radius: 10px; }
+  .logo-fallback {
+    width: 62px; height: 62px; border-radius: 10px; background: #f1f4f6;
+    display: flex; align-items: center; justify-content: center;
+    color: #168ac1; font-size: 24px; font-weight: 800; flex-shrink: 0;
+  }
+  .company { font-size: 15px; line-height: 1.4; font-weight: 700; color: #20262d; overflow-wrap: anywhere; }
+  .company-contact { margin-top: 4px; font-size: 13px; line-height: 1.45; color: #20262d; overflow-wrap: anywhere; }
+  .meta { min-width: 170px; text-align: right; color: #20262d; }
+  .invoice-meta { font-size: 14px; font-weight: 700; line-height: 1.35; }
+  .issue-label { margin-top: 20px; font-size: 13px; font-weight: 700; }
+  .issue-date { margin-top: 5px; font-size: 13px; }
+  .rule { height: 6px; background: #919da8; margin: 32px 0 38px; }
+  h1 { font-size: 34px; margin: 0 0 34px; font-weight: 800; letter-spacing: -0.025em; color: #20262d; overflow-wrap: anywhere; }
+  .summary { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+  .summary-card { border-top: 1px solid #cbd1d6; padding-top: 19px; min-width: 0; }
+  .summary h3 { margin: 0 0 8px; font-size: 13px; line-height: 1.35; font-weight: 700; }
+  .summary p { margin: 0 0 3px; font-size: 13px; line-height: 1.35; color: #20262d; overflow-wrap: anywhere; }
+  .summary .secondary-detail { color: #5f6770; }
+  .small-label { margin-top: 9px !important; font-size: 11px !important; color: #6b7280 !important; }
+  table { width: 100%; border-collapse: collapse; }
+  .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .items { margin-top: 3px; table-layout: fixed; }
+  .items th:first-child, .items td:first-child { width: 46%; padding-right: 14px; overflow-wrap: anywhere; }
+  .items th:nth-child(2), .items td:nth-child(2) { width: 14%; }
+  .items th:nth-child(3), .items td:nth-child(3) { width: 20%; }
+  .items th:nth-child(4), .items td:nth-child(4) { width: 20%; }
+  .items thead { border-top: 1px solid #cbd1d6; border-bottom: 1px solid #cbd1d6; }
+  .items th { text-align: left; font-size: 13px; font-weight: 700; padding: 13px 0 13px; }
+  .items td { padding: 17px 0; border-bottom: 1px solid #cbd1d6; font-size: 13px; line-height: 1.35; vertical-align: top; }
+  .item-detail { margin-top: 3px; font-size: 11px; color: #6b7280; white-space: pre-wrap; }
+  .num { text-align: right !important; white-space: nowrap; }
+  .subtotal td { padding-top: 14px; padding-bottom: 14px; }
+  .total td, .balance td { padding-top: 17px; padding-bottom: 17px; font-size: 24px; line-height: 1.2; font-weight: 800; }
+  .payment-wrap { margin-top: 14px; }
+  .payments thead th { text-align: left; font-size: 13px; font-weight: 700; padding: 0 0 8px; }
+  .payments td { padding: 0 0 4px; border: 0; font-size: 13px; line-height: 1.35; vertical-align: top; }
+  .payment-note { margin-top: 4px; color: #4b5563; }
+  .notes { margin-top: 24px; font-size: 12px; line-height: 1.45; color: #374151; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .notes strong { display: block; margin-bottom: 4px; color: #20262d; }
+  .footer-note { color: #6b7280; }
+  .void { margin-top: 40px; text-align: center; font-size: 48px; font-weight: 800; letter-spacing: 12px; color: #e11d48; }
+  .page-footer {
+    position: absolute;
+    left: 56px;
+    right: 56px;
+    bottom: 46px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+  }
+  .page-number { margin-left: auto; font-size: 11px; color: #8b95a1; white-space: nowrap; }
+  @media (max-width: 700px) {
+    .page { padding: 8px; }
+    .sheet { width: 100%; min-height: 0; padding: 22px 14px 30px; box-shadow: none; }
+    .letterhead { grid-template-columns: 1fr; }
+    .meta { min-width: 0; text-align: left; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; }
+    .invoice-meta { grid-column: 1 / -1; }
+    .issue-label { margin-top: 8px; }
+    .issue-date { margin-top: 8px; }
+    .logo, .logo-fallback { width: 54px; height: 54px; }
+    .rule { margin: 20px 0 24px; height: 5px; }
+    h1 { font-size: 25px; margin-bottom: 24px; }
+    .summary { grid-template-columns: 1fr; gap: 18px; }
+    .items th, .items td, .payments th, .payments td { font-size: 11px; }
+    .items th, .items td { padding-left: 3px; padding-right: 3px; }
+    .items th:first-child, .items td:first-child { width: 43%; padding-left: 0; padding-right: 8px; }
+    .items th:nth-child(2), .items td:nth-child(2) { width: 15%; }
+    .items th:nth-child(3), .items td:nth-child(3) { width: 21%; }
+    .items th:nth-child(4), .items td:nth-child(4) { width: 21%; }
+    .num { white-space: normal; overflow-wrap: anywhere; }
+    .total td, .balance td { font-size: 18px; }
+    .page-footer { position: static; margin-top: 44px; }
+    .void { font-size: 28px; letter-spacing: 6px; }
+  }
+  @media print {
+    @page { size: Letter; margin: 0; }
+    body { background: white; }
+    .page { padding: 0; }
+    .sheet { width: 8.5in; min-height: 11in; box-shadow: none; margin: 0; }
+  }
 `;
 
 export function buildInvoiceHtml(
@@ -425,17 +415,28 @@ export function buildInvoiceHtml(
 ) {
   const number = invoice.invoice_number || "draft";
   const company = options?.company || {};
-  const logoSrc = options?.logoSrc || "/camz-invoice-logo.png";
+  const logoSrc = options?.logoSrc || "";
   const documentHtml = invoiceDocument(invoice, company, logoSrc);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Invoice ${escapeHtml(
-    number,
-  )}</title><style>${invoiceCss}</style></head><body><div class="page">${documentHtml}</div></body></html>`;
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Invoice ${escapeHtml(number)}</title>
+    <style>${invoiceCss}</style>
+  </head>
+  <body>
+    <div class="page">${documentHtml}</div>
+  </body>
+</html>`;
 }
 
 export function buildInvoiceEmailHtml(invoice: InvoiceLike, company?: CompanyLike, logoSrc?: string) {
-  return `<style>${invoiceCss}</style><div style="font-family:Arial,Helvetica,sans-serif;padding:8px;max-width:816px;"><p style="font-size:14px;color:#374151;margin:0 0 16px;">Please find your invoice attached as a PDF.</p>${invoiceDocument(
-    invoice,
-    company || {},
-    logoSrc || "",
-  )}</div>`;
+  return `
+    <style>${invoiceCss}</style>
+    <div style="font-family:Arial,Helvetica,sans-serif;padding:8px;max-width:816px;">
+      <p style="font-size:14px;color:#374151;margin:0 0 16px;">Please find your invoice attached as a PDF.</p>
+      ${invoiceDocument(invoice, company || {}, logoSrc || "")}
+    </div>
+  `;
 }

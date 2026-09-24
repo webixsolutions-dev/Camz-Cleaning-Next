@@ -15,6 +15,7 @@ import { validatePricingConfig } from "@/lib/pricing/config";
 import { calculateStandardCleaningPrice } from "@/lib/pricing/standard";
 import { calculateDeepCleaningPrice } from "@/lib/pricing/deep";
 import { calculateMoveInOutPrice } from "@/lib/pricing/moveInOut";
+import { calculateCustomScopePrice, selectedCustomScopeAreas } from "@/lib/pricing/customScope";
 import { calculateCarpetPrice, carpetAreaCount } from "@/lib/pricing/carpet";
 import { resolveCleaningPricingScope } from "@/lib/pricing/serviceScope";
 import { calculateServiceAddOns } from "@/lib/pricing/addOns";
@@ -392,12 +393,26 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const bookingMode = formData.bookingMode === "custom" ? "custom" : "package";
+      const customScopeService =
+        cleaningPricingScope !== "carpet"
+          ? validation.config.services[cleaningPricingScope]
+          : null;
+
+      if (bookingMode === "custom" && (!customScopeService || !customScopeService.customScope.enabled)) {
+        return NextResponse.json(
+          { error: "Build Your Own Scope is not available for this service." },
+          { status: 400 },
+        );
+      }
+
+      const defaultAreaCount = bookingMode === "custom" ? 0 : 1;
       const areaInput = {
-        bedrooms: safeNumber(formData.bedrooms, 1),
-        fullBathrooms: safeNumber(formData.fullBathrooms, 1),
+        bedrooms: safeNumber(formData.bedrooms, defaultAreaCount),
+        fullBathrooms: safeNumber(formData.fullBathrooms, defaultAreaCount),
         halfBathrooms: safeNumber(formData.halfBathrooms, 0),
-        kitchens: safeNumber(formData.kitchens, 1),
-        livingRooms: safeNumber(formData.livingRooms, 1),
+        kitchens: safeNumber(formData.kitchens, defaultAreaCount),
+        livingRooms: safeNumber(formData.livingRooms, defaultAreaCount),
         finishedBasement: safeNumber(formData.finishedBasement, 0),
         stairFlights: safeNumber(formData.stairFlights, 0),
         unusualLayout: formData.unusualLayout === true,
@@ -418,6 +433,10 @@ export async function POST(request: NextRequest) {
       let baseCustomQuoteReason: string | null = null;
       let packageId: string | null = null;
       let packageName: string | null = null;
+      let customSelectedAreaSubtotalCents: number | null = null;
+      let customMinimumChargeCents: number | null = null;
+      let customMinimumAdjustmentCents: number | null = null;
+      let selectedCustomScope: Array<{ key: string; label: string; quantity: number }> = [];
       let pricingBreakdown: Array<{
         key: string;
         label: string;
@@ -426,7 +445,28 @@ export async function POST(request: NextRequest) {
         amount: number;
       }> = [];
 
-      if (cleaningPricingScope === "standard") {
+      if (bookingMode === "custom" && cleaningPricingScope !== "carpet") {
+        const result = calculateCustomScopePrice(
+          validation.config,
+          cleaningPricingScope,
+          areaInput,
+        );
+        baseSubtotalCents = result.subtotalCents;
+        baseCustomQuote = result.customQuote;
+        baseCustomQuoteReason = result.customQuoteReason;
+        packageName = result.packageName;
+        customSelectedAreaSubtotalCents = result.selectedAreaSubtotalCents;
+        customMinimumChargeCents = result.minimumChargeCents;
+        customMinimumAdjustmentCents = result.minimumAdjustmentCents;
+        selectedCustomScope = selectedCustomScopeAreas(result.selection);
+        pricingBreakdown = result.lineItems.map((item) => ({
+          key: item.key,
+          label: item.label,
+          quantity: item.quantity,
+          unitPrice: item.unitPriceCents / 100,
+          amount: item.amountCents / 100,
+        }));
+      } else if (cleaningPricingScope === "standard") {
         const result = calculateStandardCleaningPrice(validation.config, {
           ...areaInput,
           preferredPackageId: cleanString(formData.standardPackageId, 80),
@@ -529,6 +569,10 @@ export async function POST(request: NextRequest) {
         validation.config,
         cleaningPricingScope,
         addOnSelection,
+        {
+          bookingMode,
+          selectedAreas: areaInput,
+        },
       );
       pricingBreakdown.push(
         ...addOns.lineItems.map((item) => ({
@@ -625,6 +669,17 @@ export async function POST(request: NextRequest) {
         conditionPhotoPaths,
         selectedAddOns: sanitizedSelectedAddOns,
         pricingScope: cleaningPricingScope,
+        bookingMode,
+        ...(bookingMode === "custom"
+          ? {
+              customScope: selectedCustomScope,
+              customSelectedAreaSubtotal:
+                (customSelectedAreaSubtotalCents || 0) / 100,
+              customMinimumCharge: (customMinimumChargeCents || 0) / 100,
+              customMinimumAdjustment:
+                (customMinimumAdjustmentCents || 0) / 100,
+            }
+          : {}),
         ...(packageId ? { pricingPackageId: packageId } : {}),
         ...(packageName ? { pricingPackageName: packageName } : {}),
         ...(cleaningPricingScope === "standard" && packageId
@@ -737,16 +792,8 @@ export async function POST(request: NextRequest) {
       insertError = retry.error;
     }
 
-    if (insertError) {
-      console.error("Booking API insert failed:", insertError);
-      return NextResponse.json(
-        { error: "We could not create the booking. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    if (!booking?.id) {
-      console.error("Booking API insert returned no booking id.", { booking });
+    if (insertError || !booking) {
+      console.error("Booking API insert failed:", insertError ?? "Booking row was not returned after insert.");
       return NextResponse.json(
         { error: "We could not create the booking. Please try again." },
         { status: 500 },

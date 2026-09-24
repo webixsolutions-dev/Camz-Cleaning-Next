@@ -32,10 +32,11 @@ import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import type { CleaningPricingConfig, PricingPackage } from "@/lib/pricing/config";
+import type { CleaningPricingConfig, PricingAreaKey, PricingPackage, PricingServiceKey } from "@/lib/pricing/config";
 import { calculateStandardCleaningPrice } from "@/lib/pricing/standard";
 import { calculateDeepCleaningPrice } from "@/lib/pricing/deep";
 import { calculateMoveInOutPrice } from "@/lib/pricing/moveInOut";
+import { calculateCustomScopePrice, selectedCustomScopeAreas } from "@/lib/pricing/customScope";
 import { calculateCarpetPrice, carpetAreaCount } from "@/lib/pricing/carpet";
 import { resolveCleaningPricingScope } from "@/lib/pricing/serviceScope";
 import {
@@ -886,20 +887,54 @@ const BookingModal = ({
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
-  const applyStandardPackage = (pkg: PricingPackage) => {
+  const isCustomScopeMode =
+    formData.bookingMode === "custom" &&
+    cleaningPricingScope !== null &&
+    cleaningPricingScope !== "carpet";
+
+  const applyCustomScopeMode = () => {
+    if (!cleaningPricingScope || cleaningPricingScope === "carpet") return;
+    const servicePricing = cleaningPricingConfig?.services[cleaningPricingScope];
+    if (servicePricing && !servicePricing.customScope.enabled) return;
+
     setPricingType("Fixed");
     setFormData((prev) => ({
       ...prev,
-      standardPackageId: pkg.id,
-      bedrooms: Math.max(1, pkg.allowances.bedrooms),
-      fullBathrooms: Math.max(1, pkg.allowances.fullBathrooms),
+      bookingMode: "custom",
+      standardPackageId: null,
+      pricingPackageId: null,
+      bedrooms: 0,
+      fullBathrooms: 0,
       halfBathrooms: 0,
-      kitchens: Math.max(1, pkg.allowances.kitchens),
-      livingRooms: Math.max(1, pkg.allowances.livingRooms),
+      kitchens: 0,
+      livingRooms: 0,
       finishedBasement: 0,
       stairFlights: 0,
       unusualLayout: false,
     }));
+  };
+
+  const applyCleaningPackage = (pkg: PricingPackage) => {
+    setPricingType("Fixed");
+    setFormData((prev) => ({
+      ...prev,
+      bookingMode: "package",
+      pricingPackageId: pkg.id,
+      standardPackageId:
+        cleaningPricingScope === "standard" ? pkg.id : prev.standardPackageId,
+      bedrooms: Math.max(0, pkg.allowances.bedrooms),
+      fullBathrooms: Math.max(0, pkg.allowances.fullBathrooms),
+      halfBathrooms: Math.max(0, pkg.allowances.halfBathrooms),
+      kitchens: Math.max(0, pkg.allowances.kitchens),
+      livingRooms: Math.max(0, pkg.allowances.livingRooms),
+      finishedBasement: Math.max(0, pkg.allowances.finishedBasement),
+      stairFlights: Math.max(0, pkg.allowances.stairFlights),
+      unusualLayout: false,
+    }));
+  };
+
+  const applyStandardPackage = (pkg: PricingPackage) => {
+    applyCleaningPackage(pkg);
   };
 
   const getCleaningAreaSelection = () => ({
@@ -913,8 +948,31 @@ const BookingModal = ({
     unusualLayout: formData.unusualLayout,
   });
 
+  const getCustomScopePricingResult = () => {
+    if (
+      !cleaningPricingConfig ||
+      !cleaningPricingScope ||
+      cleaningPricingScope === "carpet" ||
+      formData.bookingMode !== "custom"
+    ) {
+      return null;
+    }
+
+    const serviceKey = cleaningPricingScope as PricingServiceKey;
+    if (!cleaningPricingConfig.services[serviceKey].customScope.enabled) return null;
+    return calculateCustomScopePrice(
+      cleaningPricingConfig,
+      serviceKey,
+      getCleaningAreaSelection(),
+    );
+  };
+
   const getStandardPricingResult = () => {
-    if (!cleaningPricingConfig || cleaningPricingScope !== "standard") {
+    if (
+      !cleaningPricingConfig ||
+      cleaningPricingScope !== "standard" ||
+      formData.bookingMode === "custom"
+    ) {
       return null;
     }
 
@@ -925,7 +983,11 @@ const BookingModal = ({
   };
 
   const getDeepPricingResult = () => {
-    if (!cleaningPricingConfig || cleaningPricingScope !== "deep") {
+    if (
+      !cleaningPricingConfig ||
+      cleaningPricingScope !== "deep" ||
+      formData.bookingMode === "custom"
+    ) {
       return null;
     }
     return calculateDeepCleaningPrice(
@@ -935,7 +997,11 @@ const BookingModal = ({
   };
 
   const getMoveInOutPricingResult = () => {
-    if (!cleaningPricingConfig || cleaningPricingScope !== "move_in_out") {
+    if (
+      !cleaningPricingConfig ||
+      cleaningPricingScope !== "move_in_out" ||
+      formData.bookingMode === "custom"
+    ) {
       return null;
     }
     return calculateMoveInOutPrice(
@@ -987,6 +1053,10 @@ const BookingModal = ({
       cleaningPricingConfig,
       cleaningPricingScope,
       (formData.selectedAddOns || {}) as Record<string, number | boolean>,
+      {
+        bookingMode: isCustomScopeMode ? "custom" : "package",
+        selectedAreas: getCleaningAreaSelection(),
+      },
     );
   };
 
@@ -1066,13 +1136,14 @@ const BookingModal = ({
 
     if (cleaningPricingScope && cleaningPricingConfig) {
       const baseResult =
-        cleaningPricingScope === "standard"
+        getCustomScopePricingResult() ||
+        (cleaningPricingScope === "standard"
           ? getStandardPricingResult()
           : cleaningPricingScope === "deep"
             ? getDeepPricingResult()
             : cleaningPricingScope === "move_in_out"
               ? getMoveInOutPricingResult()
-              : getStandaloneCarpetPricingResult();
+              : getStandaloneCarpetPricingResult());
 
       if (!baseResult) {
         return {
@@ -1291,6 +1362,8 @@ const BookingModal = ({
     carpetHeavyStainAreas: 0,
     carpetPetUrineOdor: false,
     carpetCondition: "regular",
+    bookingMode: "package",
+    pricingPackageId: null,
   });
 
   const initializeFormData = (
@@ -1308,6 +1381,7 @@ const BookingModal = ({
       setFormData({
         ...initialCleaningFields(),
         standardPackageId: "essential_standard",
+        pricingPackageId: "essential_standard",
       });
       return;
     }
@@ -1589,6 +1663,97 @@ const BookingModal = ({
   const cleaningSelectClass =
     "h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-800 shadow-sm outline-none transition-all hover:border-slate-300 focus:border-blue-400 focus:ring-4 focus:ring-blue-100/70";
 
+  const customAreaControls: Array<{ key: PricingAreaKey; label: string; max: number }> = [
+    { key: "bedrooms", label: "Bedrooms", max: 12 },
+    { key: "fullBathrooms", label: "Full Bathrooms", max: 12 },
+    { key: "halfBathrooms", label: "Half Bathrooms", max: 10 },
+    { key: "kitchens", label: "Kitchens", max: 5 },
+    { key: "livingRooms", label: "Living / Family Rooms", max: 10 },
+    { key: "finishedBasement", label: "Finished Basement Living Areas", max: 4 },
+    { key: "stairFlights", label: "Flights of Stairs", max: 10 },
+  ];
+
+  const getCustomScopeTaskDetail = (key: PricingAreaKey) => {
+    if (!cleaningPricingScope || cleaningPricingScope === "carpet") return null;
+
+    const details: Record<
+      PricingServiceKey,
+      Partial<Record<PricingAreaKey, string>>
+    > = {
+      standard: {
+        bedrooms: "Standard room cleaning.",
+        fullBathrooms: "General bathroom cleaning.",
+        halfBathrooms: "General bathroom cleaning.",
+        kitchens:
+          "Counters, backsplash, sink, stovetop and appliance exteriors within Standard scope.",
+      },
+      deep: {
+        bedrooms:
+          "Standard room cleaning plus baseboards, door frames, detailed doors/switches, edges and corners.",
+        fullBathrooms:
+          "Detailed tub/shower, glass and fixtures, baseboards, door frames and buildup attention.",
+        halfBathrooms:
+          "Detailed bathroom cleaning, baseboards, door frames and buildup attention.",
+        kitchens: "Detailed kitchen cleaning and degreasing within Deep scope.",
+      },
+      move_in_out: {
+        bedrooms: "Empty-room turnover cleaning plus applicable move-out detail.",
+        fullBathrooms: "Turnover bathroom cleaning plus applicable move-out detail.",
+        halfBathrooms: "Turnover bathroom cleaning plus applicable move-out detail.",
+        kitchens:
+          "Move-out kitchen scope, including applicable inside empty appliances and cabinets already included by Move-In / Move-Out rules.",
+      },
+    };
+
+    return details[cleaningPricingScope][key] || null;
+  };
+
+  const renderCustomAreaCounter = (
+    key: PricingAreaKey,
+    label: string,
+    max: number,
+  ) => {
+    const value = Math.max(0, Number(formData[key] || 0));
+    const unitPrice =
+      cleaningPricingConfig && cleaningPricingScope && cleaningPricingScope !== "carpet"
+        ? cleaningPricingConfig.services[cleaningPricingScope].additionalCharges[key]
+        : 0;
+
+    return (
+      <div key={key} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black text-slate-700">{label}</p>
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              ${((unitPrice || 0) / 100).toFixed(0)} each
+            </p>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => updateField(key, Math.max(0, value - 1))}
+              disabled={value <= 0}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-35"
+              aria-label={`Decrease ${label}`}
+            >
+              <Minus size={14} />
+            </button>
+            <span className="min-w-7 text-center text-sm font-black text-slate-800">{value}</span>
+            <button
+              type="button"
+              onClick={() => updateField(key, Math.min(max, value + 1))}
+              disabled={value >= max}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+              aria-label={`Increase ${label}`}
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderCleaningPropertyFields = () => (
     <div className="mb-5 space-y-5">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1597,7 +1762,9 @@ const BookingModal = ({
           <div>
             <p className="text-sm font-black text-slate-800">Property Information</p>
             <p className="mt-1 text-[11px] leading-5 text-slate-400">
-              Tell us about the property so the correct package, included areas and additional charges can be applied.
+              {isCustomScopeMode
+                ? "Choose only the rooms and areas you want cleaned. Any counter can stay at 0."
+                : "Tell us about the property so the correct package, included areas and additional charges can be applied."}
             </p>
           </div>
         </div>
@@ -1671,70 +1838,127 @@ const BookingModal = ({
         )}
 
         <div className="mb-4">
-          <p className="text-sm font-black text-slate-800">Property Size</p>
+          <p className="text-sm font-black text-slate-800">
+            {isCustomScopeMode ? "Build Your Own Scope" : "Property Size"}
+          </p>
           <p className="mt-1 text-[11px] leading-5 text-slate-400">
-            The calculator applies the correct base tier first, then charges only for areas beyond that tier.
+            {isCustomScopeMode
+              ? "All counters start at 0. Select only the areas you want cleaned; the minimum service charge still applies."
+              : "The calculator applies the correct base tier first, then charges only for areas beyond that tier."}
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Bedrooms</label>
-            <select value={formData.bedrooms ?? 1} onChange={(e) => updateField("bedrooms", Number(e.target.value))} className={cleaningSelectClass}>
-              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} Bedroom{n > 1 ? "s" : ""}</option>)}
-            </select>
-          </div>
+        {isCustomScopeMode ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {customAreaControls.map(({ key, label, max }) =>
+              renderCustomAreaCounter(key, label, max),
+            )}
+            <div className="flex items-end sm:col-span-2">
+              <label className="flex min-h-[46px] w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-600">
+                <input type="checkbox" checked={formData.unusualLayout === true} onChange={(e) => updateField("unusualLayout", e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                Unusual property layout
+              </label>
+            </div>
 
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Full Bathrooms</label>
-            <select value={formData.fullBathrooms ?? 1} onChange={(e) => updateField("fullBathrooms", Number(e.target.value))} className={cleaningSelectClass}>
-              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} Full Bathroom{n > 1 ? "s" : ""}</option>)}
-            </select>
-          </div>
+            <div className="sm:col-span-2">
+              {(() => {
+                const customResult = getCustomScopePricingResult();
+                const selectedAreas = customResult
+                  ? selectedCustomScopeAreas(customResult.selection)
+                  : [];
 
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Half Bathrooms</label>
-            <select value={formData.halfBathrooms ?? 0} onChange={(e) => updateField("halfBathrooms", Number(e.target.value))} className={cleaningSelectClass}>
-              {[0, 1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
+                return (
+                  <div className="rounded-2xl border border-teal-100 bg-teal-50/50 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-teal-700">
+                      Selected custom scope
+                    </p>
+                    {selectedAreas.length === 0 ? (
+                      <p className="mt-2 text-xs leading-5 text-teal-800">
+                        No rooms or areas selected yet. The service minimum still applies before add-ons.
+                      </p>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        {selectedAreas.map((area) => {
+                          const taskDetail = getCustomScopeTaskDetail(area.key);
+                          return (
+                            <div key={area.key} className="rounded-xl border border-teal-100 bg-white px-3 py-2.5">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-xs font-black text-slate-800">{area.label}</span>
+                                <span className="rounded-full bg-teal-50 px-2 py-1 text-[10px] font-black text-teal-700">× {area.quantity}</span>
+                              </div>
+                              {taskDetail && (
+                                <p className="mt-1.5 text-[11px] leading-5 text-slate-500">{taskDetail}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Bedrooms</label>
+              <select value={formData.bedrooms ?? 1} onChange={(e) => updateField("bedrooms", Number(e.target.value))} className={cleaningSelectClass}>
+                {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} Bedroom{n > 1 ? "s" : ""}</option>)}
+              </select>
+            </div>
 
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Kitchens</label>
-            <select value={formData.kitchens ?? 1} onChange={(e) => updateField("kitchens", Number(e.target.value))} className={cleaningSelectClass}>
-              {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </div>
+            <div className="space-y-1.5">
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Full Bathrooms</label>
+              <select value={formData.fullBathrooms ?? 1} onChange={(e) => updateField("fullBathrooms", Number(e.target.value))} className={cleaningSelectClass}>
+                {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} Full Bathroom{n > 1 ? "s" : ""}</option>)}
+              </select>
+            </div>
 
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Living / Family Rooms</label>
-            <select value={formData.livingRooms ?? 1} onChange={(e) => updateField("livingRooms", Number(e.target.value))} className={cleaningSelectClass}>
-              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </div>
+            <div className="space-y-1.5">
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Half Bathrooms</label>
+              <select value={formData.halfBathrooms ?? 0} onChange={(e) => updateField("halfBathrooms", Number(e.target.value))} className={cleaningSelectClass}>
+                {[0, 1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
 
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Finished Basement Living Area</label>
-            <select value={formData.finishedBasement ?? 0} onChange={(e) => updateField("finishedBasement", Number(e.target.value))} className={cleaningSelectClass}>
-              <option value={0}>No</option>
-              <option value={1}>Yes</option>
-            </select>
-          </div>
+            <div className="space-y-1.5">
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Kitchens</label>
+              <select value={formData.kitchens ?? 1} onChange={(e) => updateField("kitchens", Number(e.target.value))} className={cleaningSelectClass}>
+                {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
 
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Flights of Stairs</label>
-            <select value={formData.stairFlights ?? 0} onChange={(e) => updateField("stairFlights", Number(e.target.value))} className={cleaningSelectClass}>
-              {[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </div>
+            <div className="space-y-1.5">
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Living / Family Rooms</label>
+              <select value={formData.livingRooms ?? 1} onChange={(e) => updateField("livingRooms", Number(e.target.value))} className={cleaningSelectClass}>
+                {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
 
-          <div className="flex items-end">
-            <label className="flex min-h-[46px] w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-600">
-              <input type="checkbox" checked={formData.unusualLayout === true} onChange={(e) => updateField("unusualLayout", e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
-              Unusual property layout
-            </label>
+            <div className="space-y-1.5">
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Finished Basement Living Area</label>
+              <select value={formData.finishedBasement ?? 0} onChange={(e) => updateField("finishedBasement", Number(e.target.value))} className={cleaningSelectClass}>
+                <option value={0}>No</option>
+                <option value={1}>Yes</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Flights of Stairs</label>
+              <select value={formData.stairFlights ?? 0} onChange={(e) => updateField("stairFlights", Number(e.target.value))} className={cleaningSelectClass}>
+                {[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+
+            <div className="flex items-end">
+              <label className="flex min-h-[46px] w-full cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-600">
+                <input type="checkbox" checked={formData.unusualLayout === true} onChange={(e) => updateField("unusualLayout", e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                Unusual property layout
+              </label>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="mt-4 space-y-1.5">
           <label className="ml-1 text-[10px] font-black uppercase text-slate-500">Additional Instructions</label>
@@ -1818,7 +2042,10 @@ const BookingModal = ({
 
   const renderAddOnsConfigurator = () => {
     if (!cleaningPricingConfig || !cleaningPricingScope) return null;
-    const visibleAddOns = getVisibleAddOns(cleaningPricingConfig, cleaningPricingScope);
+    const visibleAddOns = getVisibleAddOns(cleaningPricingConfig, cleaningPricingScope, {
+      bookingMode: isCustomScopeMode ? "custom" : "package",
+      selectedAreas: getCleaningAreaSelection(),
+    });
     if (visibleAddOns.length === 0) return null;
 
     const selected = (formData.selectedAddOns || {}) as Record<string, number | boolean>;
@@ -2034,12 +2261,125 @@ const BookingModal = ({
     );
   };
 
+  const renderCleaningModeSelector = (serviceKey: PricingServiceKey) => {
+    if (!cleaningPricingConfig) return null;
+    const servicePricing = cleaningPricingConfig.services[serviceKey];
+    const customEnabled = servicePricing.customScope.enabled;
+    const packageMode = formData.bookingMode !== "custom";
+
+    return (
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3">
+          <p className="text-sm font-black text-slate-800">Choose how you want to build the service</p>
+          <p className="mt-1 text-[11px] leading-5 text-slate-500">
+            Use a prebuilt package for a quick setup, or build a custom scope with any room count starting at 0.
+          </p>
+        </div>
+        <div className={`grid gap-2 ${customEnabled ? "grid-cols-2" : "grid-cols-1"}`}>
+          <button
+            type="button"
+            onClick={() => {
+              const preferredId =
+                serviceKey === "standard" ? "essential_standard" : servicePricing.packages[0]?.id;
+              const pkg =
+                servicePricing.packages.find((item) => item.id === preferredId) ||
+                servicePricing.packages[0];
+              if (pkg) applyCleaningPackage(pkg);
+            }}
+            className={`rounded-xl border px-3 py-3 text-left transition ${
+              packageMode
+                ? "border-blue-600 bg-blue-50 ring-1 ring-blue-100"
+                : "border-slate-200 bg-slate-50 hover:border-blue-200"
+            }`}
+          >
+            <span className="block text-xs font-black text-slate-800">Prebuilt Package</span>
+            <span className="mt-1 block text-[10px] leading-4 text-slate-500">Existing package prices and included room allowances.</span>
+          </button>
+          {customEnabled && (
+            <button
+              type="button"
+              onClick={applyCustomScopeMode}
+              className={`rounded-xl border px-3 py-3 text-left transition ${
+                !packageMode
+                  ? "border-teal-600 bg-teal-50 ring-1 ring-teal-100"
+                  : "border-slate-200 bg-slate-50 hover:border-teal-200"
+              }`}
+            >
+              <span className="block text-xs font-black text-slate-800">Build Your Own Scope</span>
+              <span className="mt-1 block text-[10px] leading-4 text-slate-500">Choose only the areas you need. All counters can stay at 0.</span>
+            </button>
+          )}
+        </div>
+        {!packageMode && (
+          <div className="mt-3 rounded-xl border border-teal-100 bg-teal-50 px-3 py-2.5">
+            <p className="text-[10px] font-black uppercase tracking-wider text-teal-700">Minimum service charge</p>
+            <p className="mt-1 text-sm font-black text-teal-900">
+              ${(servicePricing.customScope.minimumChargeCents / 100).toFixed(0)} minimum
+            </p>
+            <p className="mt-1 text-[10px] leading-4 text-teal-700">Choose any combination of areas. The actual selected-area total applies once it exceeds the minimum.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPackageChoices = (serviceKey: PricingServiceKey) => {
+    if (!cleaningPricingConfig || formData.bookingMode === "custom") return null;
+    const servicePricing = cleaningPricingConfig.services[serviceKey];
+    const packages =
+      serviceKey === "standard"
+        ? servicePricing.packages.filter((pkg) => pkg.customerSelectable)
+        : servicePricing.packages;
+
+    return (
+      <div className="mb-5">
+        <div className="mb-3">
+          <label className="ml-1 text-[11px] font-black uppercase tracking-wider text-slate-500">Choose a starting package</label>
+          <p className="ml-1 mt-1 text-[11px] text-slate-400">Select a preset, then adjust the property details if needed.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {packages.map((pkg) => {
+            const selectedId =
+              serviceKey === "standard"
+                ? formData.standardPackageId
+                : serviceKey === "deep"
+                  ? getDeepPricingResult()?.packageId
+                  : getMoveInOutPricingResult()?.packageId;
+            const selected = selectedId === pkg.id;
+            const popular = pkg.id === "complete_standard";
+            return (
+              <button
+                type="button"
+                key={pkg.id}
+                onClick={() => applyCleaningPackage(pkg)}
+                className={`relative rounded-2xl border-2 p-4 text-left transition-all ${
+                  selected ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300"
+                }`}
+              >
+                {popular && <span className="absolute -top-2.5 right-3 rounded-full bg-blue-600 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-white">Most Popular</span>}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-slate-800">{pkg.name}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{pkg.description}</p>
+                  </div>
+                  <p className="shrink-0 text-lg font-black text-blue-600">${(pkg.basePriceCents / 100).toFixed(0)}</p>
+                </div>
+                {selected && <div className="mt-3 flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-blue-700"><CheckCircle2 size={13} /> Selected</div>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const renderCleaningEstimate = (
     label: string,
     result:
       | ReturnType<typeof getStandardPricingResult>
       | ReturnType<typeof getDeepPricingResult>
-      | ReturnType<typeof getMoveInOutPricingResult>,
+      | ReturnType<typeof getMoveInOutPricingResult>
+      | ReturnType<typeof getCustomScopePricingResult>,
   ) => {
     if (!result) return null;
     const combined = calculatePricing();
@@ -2057,7 +2397,17 @@ const BookingModal = ({
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-[10px] font-black uppercase tracking-wider text-blue-600">{label}</p>
-              <p className="mt-1 text-xs text-slate-500">Applied tier: {result.packageName}</p>
+              {formData.bookingMode === "custom" && "selectedAreaSubtotalCents" in result ? (
+                <div className="mt-1 space-y-0.5 text-xs text-slate-500">
+                  <p>Selected-area subtotal: ${(result.selectedAreaSubtotalCents / 100).toFixed(2)}</p>
+                  <p>Minimum charge: ${(result.minimumChargeCents / 100).toFixed(2)}</p>
+                  {result.minimumAdjustmentCents > 0 && (
+                    <p>Minimum adjustment: +${(result.minimumAdjustmentCents / 100).toFixed(2)}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-slate-500">Applied tier: {result.packageName}</p>
+              )}
             </div>
             <div className="text-right">
               <p className="text-xl font-black text-blue-700">${combined.total.toFixed(2)}</p>
@@ -2092,37 +2442,12 @@ const BookingModal = ({
       }
 
       if (cleaningPricingScope === "standard") {
-        const standard = cleaningPricingConfig.services.standard;
-        const selectablePackages = standard.packages.filter((pkg) => pkg.customerSelectable);
-        const livePricing = getStandardPricingResult();
+        const livePricing = getCustomScopePricingResult() || getStandardPricingResult();
 
         return (
           <>
-            <div className="mb-6">
-              <div className="mb-3">
-                <label className="ml-1 text-[11px] font-black uppercase tracking-wider text-slate-500">Choose a starting package</label>
-                <p className="ml-1 mt-1 text-[11px] text-slate-400">Your price updates automatically as you change the property size.</p>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {selectablePackages.map((pkg) => {
-                  const selected = formData.standardPackageId === pkg.id;
-                  const popular = pkg.id === "complete_standard";
-                  return (
-                    <button type="button" key={pkg.id} onClick={() => applyStandardPackage(pkg)} className={`relative rounded-2xl border-2 p-4 text-left transition-all ${selected ? "border-blue-600 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-300"}`}>
-                      {popular && <span className="absolute -top-2.5 right-3 rounded-full bg-blue-600 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-white">Most Popular</span>}
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-black text-slate-800">{pkg.name}</p>
-                          <p className="mt-1 text-xs leading-5 text-slate-500">{pkg.description}</p>
-                        </div>
-                        <p className="shrink-0 text-lg font-black text-blue-600">${(pkg.basePriceCents / 100).toFixed(0)}</p>
-                      </div>
-                      {selected && <div className="mt-3 flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-blue-700"><CheckCircle2 size={13} /> Selected</div>}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {renderCleaningModeSelector("standard")}
+            {renderPackageChoices("standard")}
             {renderCleaningPropertyFields()}
             {renderAddOnsConfigurator()}
             {renderCarpetConfigurator(false)}
@@ -2132,13 +2457,17 @@ const BookingModal = ({
       }
 
       if (cleaningPricingScope === "deep") {
-        const livePricing = getDeepPricingResult();
+        const livePricing = getCustomScopePricingResult() || getDeepPricingResult();
         return (
           <>
-            <div className="mb-5 rounded-2xl border border-purple-100 bg-purple-50 p-4">
-              <p className="text-sm font-black text-purple-900">Deep Cleaning — From ${(cleaningPricingConfig.services.deep.startingPriceCents / 100).toFixed(0)}</p>
-              <p className="mt-1 text-xs leading-5 text-purple-700">Dedicated Deep Cleaning tiers and room increments are used. The price is not calculated as a universal Standard + upgrade fee.</p>
-            </div>
+            {renderCleaningModeSelector("deep")}
+            {renderPackageChoices("deep")}
+            {formData.bookingMode !== "custom" && (
+              <div className="mb-5 rounded-2xl border border-purple-100 bg-purple-50 p-4">
+                <p className="text-sm font-black text-purple-900">Deep Cleaning — From ${(cleaningPricingConfig.services.deep.startingPriceCents / 100).toFixed(0)}</p>
+                <p className="mt-1 text-xs leading-5 text-purple-700">Dedicated Deep Cleaning tiers and room increments are used in package mode.</p>
+              </div>
+            )}
             {renderCleaningPropertyFields()}
             {renderAddOnsConfigurator()}
             {renderCarpetConfigurator(false)}
@@ -2148,13 +2477,17 @@ const BookingModal = ({
       }
 
       if (cleaningPricingScope === "move_in_out") {
-        const livePricing = getMoveInOutPricingResult();
+        const livePricing = getCustomScopePricingResult() || getMoveInOutPricingResult();
         return (
           <>
-            <div className="mb-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-              <p className="text-sm font-black text-emerald-900">Move-In / Move-Out — From ${(cleaningPricingConfig.services.move_in_out.startingPriceCents / 100).toFixed(0)}</p>
-              <p className="mt-1 text-xs leading-5 text-emerald-700">The closest documented base tier is applied first. Properties with 5+ bedrooms require a custom quote.</p>
-            </div>
+            {renderCleaningModeSelector("move_in_out")}
+            {renderPackageChoices("move_in_out")}
+            {formData.bookingMode !== "custom" && (
+              <div className="mb-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                <p className="text-sm font-black text-emerald-900">Move-In / Move-Out — From ${(cleaningPricingConfig.services.move_in_out.startingPriceCents / 100).toFixed(0)}</p>
+                <p className="mt-1 text-xs leading-5 text-emerald-700">The closest documented package tier is applied in package mode. Build Your Own Scope uses selected area values and the service minimum.</p>
+              </div>
+            )}
             {renderCleaningPropertyFields()}
             {renderAddOnsConfigurator()}
             {renderCarpetConfigurator(false)}
@@ -2391,7 +2724,7 @@ const BookingModal = ({
                   <p className="mt-1 text-sm leading-6 text-slate-500">See the included scope first, then choose only the rooms and add-ons you need.</p>
                 </div>
 
-                {serviceTransparency && (
+                {serviceTransparency && !isCustomScopeMode && (
                   <div className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
                       <p className="text-sm font-black text-slate-900">What&apos;s included in your service</p>
@@ -2452,7 +2785,21 @@ const BookingModal = ({
                   </div>
                 )}
 
-                {cleaningPricingScope && (
+                {isCustomScopeMode && cleaningPricingScope && (
+                  <div className="mb-5 rounded-2xl border border-teal-200 bg-teal-50/80 p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
+                      <div>
+                        <p className="text-xs font-black text-teal-900">Build Your Own Scope</p>
+                        <p className="mt-1 text-xs leading-5 text-teal-800">
+                          Only areas with a quantity above 0 are part of your cleaning scope. Unselected rooms are not described as included. Independent add-ons remain separate when applicable.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {cleaningPricingScope && !isCustomScopeMode && (
                   <div className="mb-5 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
                     <p className="text-xs leading-5 text-slate-700">
@@ -2946,10 +3293,14 @@ const BookingModal = ({
                           {service.title}
                         </p>
                         {cleaningPricingScope !== "carpet" && (() => {
-                          const applied = getStandardPricingResult() || getDeepPricingResult() || getMoveInOutPricingResult();
+                          const applied =
+                            getCustomScopePricingResult() ||
+                            getStandardPricingResult() ||
+                            getDeepPricingResult() ||
+                            getMoveInOutPricingResult();
                           return applied ? (
                             <p className="mt-1 text-xs font-semibold text-slate-500">
-                              {applied.packageName}
+                              {formData.bookingMode === "custom" ? "Build Your Own Scope" : applied.packageName}
                             </p>
                           ) : null;
                         })()}
@@ -3001,9 +3352,17 @@ const BookingModal = ({
                         <p className="mt-1 text-sm font-bold text-slate-800">
                           {cleaningPricingScope === "carpet"
                             ? `${getStandaloneCarpetPricingResult() ? carpetAreaCount(getStandaloneCarpetPricingResult()!.selection) : 0} carpet area(s)`
-                            : cleaningPricingScope
-                              ? `${Number(formData.bedrooms || 0)} bed, ${Number(formData.fullBathrooms || 0)} full bath${Number(formData.halfBathrooms || 0) ? `, ${Number(formData.halfBathrooms || 0)} half bath` : ""}`
-                              : "See service details below"}
+                            : cleaningPricingScope && isCustomScopeMode
+                              ? (() => {
+                                  const selected = getCustomScopePricingResult();
+                                  const areas = selected ? selectedCustomScopeAreas(selected.selection) : [];
+                                  return areas.length
+                                    ? areas.map((area) => `${area.quantity} ${area.label.toLowerCase()}${area.quantity > 1 ? "s" : ""}`).join(", ")
+                                    : "No areas selected — service minimum applies";
+                                })()
+                              : cleaningPricingScope
+                                ? `${Number(formData.bedrooms || 0)} bed, ${Number(formData.fullBathrooms || 0)} full bath${Number(formData.halfBathrooms || 0) ? `, ${Number(formData.halfBathrooms || 0)} half bath` : ""}`
+                                : "See service details below"}
                         </p>
                       </div>
                     </div>
@@ -3064,13 +3423,34 @@ const BookingModal = ({
                         ["Living / family rooms", formData.livingRooms],
                         ["Finished basement", formData.finishedBasement],
                         ["Stair flights", formData.stairFlights],
-                      ].map(([label, value]) => (
+                      ]
+                        .filter(([, value]) => !isCustomScopeMode || Number(value || 0) > 0)
+                        .map(([label, value]) => (
                         <div key={String(label)} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
                           <span className="block text-[10px] font-bold uppercase leading-4 tracking-wide text-slate-400">{label}</span>
                           <span className="mt-1 block text-lg font-black leading-none text-slate-800">{Number(value || 0)}</span>
                         </div>
                       ))}
                     </div>
+
+                    {isCustomScopeMode && getCustomScopePricingResult() && selectedCustomScopeAreas(getCustomScopePricingResult()!.selection).length === 0 && (
+                      <div className="mt-3 rounded-xl border border-teal-100 bg-teal-50 p-3 text-xs font-semibold text-teal-800">
+                        No room or area quantities were selected. The custom service minimum still applies before add-ons.
+                      </div>
+                    )}
+
+                    {isCustomScopeMode && getCustomScopePricingResult() && (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="mb-2 text-[10px] font-black uppercase text-slate-400">Custom scope price detail</p>
+                        <div className="space-y-1.5 text-xs">
+                          <div className="flex justify-between gap-3"><span className="text-slate-500">Selected-area subtotal</span><span className="font-black text-slate-800">${(getCustomScopePricingResult()!.selectedAreaSubtotalCents / 100).toFixed(2)}</span></div>
+                          <div className="flex justify-between gap-3"><span className="text-slate-500">Service minimum</span><span className="font-black text-slate-800">${(getCustomScopePricingResult()!.minimumChargeCents / 100).toFixed(2)}</span></div>
+                          {getCustomScopePricingResult()!.minimumAdjustmentCents > 0 && (
+                            <div className="flex justify-between gap-3"><span className="text-slate-500">Minimum adjustment</span><span className="font-black text-slate-800">+${(getCustomScopePricingResult()!.minimumAdjustmentCents / 100).toFixed(2)}</span></div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {!cleaningPricingScope && (
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
