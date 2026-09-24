@@ -1,4 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { centsToDollars } from "@/lib/crm/money";
 import type { CompanyLike, InvoiceAddress, InvoiceLike } from "@/lib/crm/pdf";
 
@@ -70,31 +72,45 @@ function wrap(font: PDFFont, value: string, size: number, maxWidth: number) {
 
 async function embedLogo(doc: PDFDocument, src?: string | null): Promise<PDFImage | null> {
   if (!src) return null;
+
   try {
     let bytes: Uint8Array;
     let mime = "";
+    const cleanSrc = src.split("?")[0];
+
     if (src.startsWith("data:")) {
       const match = src.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
       if (!match) return null;
       mime = match[1].toLowerCase();
       bytes = Uint8Array.from(Buffer.from(match[2], "base64"));
     } else if (src.startsWith("http://") || src.startsWith("https://")) {
-      const response = await fetch(src);
+      const response = await fetch(src, { cache: "no-store" });
       if (!response.ok) return null;
       mime = (response.headers.get("content-type") || "").toLowerCase();
       bytes = new Uint8Array(await response.arrayBuffer());
-      if (!mime) {
-        if (src.includes(".png")) mime = "image/png";
-        else if (src.includes(".jpg") || src.includes(".jpeg")) mime = "image/jpeg";
-      }
     } else {
-      return null;
+      // The HTML preview can resolve `/logo.png` in the browser, but pdf-lib runs
+      // on the server and cannot fetch a relative URL. Read the same asset from
+      // Next.js' public directory so the downloaded PDF gets the real logo too.
+      const relativePath = decodeURIComponent(cleanSrc).replace(/^\/+/, "").replace(/^public\//, "");
+      if (!relativePath || relativePath.includes("..")) return null;
+      const publicPath = path.join(process.cwd(), "public", relativePath);
+      bytes = new Uint8Array(await readFile(publicPath));
     }
+
+    const lowerSrc = cleanSrc.toLowerCase();
+    if (!mime) {
+      if (lowerSrc.endsWith(".png")) mime = "image/png";
+      else if (lowerSrc.endsWith(".jpg") || lowerSrc.endsWith(".jpeg")) mime = "image/jpeg";
+    }
+
     if (mime.includes("png")) return doc.embedPng(bytes);
     if (mime.includes("jpeg") || mime.includes("jpg")) return doc.embedJpg(bytes);
+
+    console.warn("CRM invoice logo format is not supported by pdf-lib:", src);
     return null;
   } catch (error) {
-    console.error("CRM invoice logo embed skipped:", error);
+    console.error("CRM invoice logo embed skipped:", src, error);
     return null;
   }
 }
@@ -147,7 +163,7 @@ export async function buildInvoicePdfBytes(options: {
   const doc = await PDFDocument.create();
   const regular = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const logo = await embedLogo(doc, options.logoSrc);
+  const logo = (await embedLogo(doc, options.logoSrc)) || (await embedLogo(doc, "/camz-invoice-logo.png"));
 
   let page = doc.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - MARGIN;

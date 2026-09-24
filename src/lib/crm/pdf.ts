@@ -425,7 +425,7 @@ export function buildInvoiceHtml(
 ) {
   const number = invoice.invoice_number || "draft";
   const company = options?.company || {};
-  const logoSrc = options?.logoSrc || "";
+  const logoSrc = options?.logoSrc || "/camz-invoice-logo.png";
   const documentHtml = invoiceDocument(invoice, company, logoSrc);
   return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Invoice ${escapeHtml(
     number,
