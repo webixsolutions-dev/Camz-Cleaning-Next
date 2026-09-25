@@ -10,6 +10,8 @@ export type AddOnSelection = Record<string, number | boolean | string | null | u
 export type AddOnVisibilityContext = {
   bookingMode?: "package" | "custom";
   selectedAreas?: Partial<PricingAreaValues>;
+  /** Treat the package as room-by-room customizable for inclusion rules. */
+  respectSelectedAreas?: boolean;
 };
 
 const CUSTOM_AREA_RELATED_ADDONS: Partial<Record<string, keyof PricingAreaValues | "any_area">> = {
@@ -96,7 +98,9 @@ export function getVisibleAddOns(
 ) {
   const serviceIncludedItems =
     scope === "carpet" ? [] : config.services[scope].includedItems;
-  const customMode = context?.bookingMode === "custom" && scope !== "carpet";
+  const customMode =
+    (context?.bookingMode === "custom" || context?.respectSelectedAreas === true) &&
+    scope !== "carpet";
 
   return config.addOns.filter((addOn) => {
     if (!addOn.active) return false;

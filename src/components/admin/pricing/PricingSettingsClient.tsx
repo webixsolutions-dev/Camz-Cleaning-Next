@@ -182,7 +182,7 @@ export default function PricingSettingsClient() {
           <div>
             <div className="flex items-center gap-2 text-[#4A86F7]"><BadgeDollarSign size={20} /><span className="text-xs font-extrabold uppercase tracking-[0.18em]">Phase 1</span></div>
             <h1 className="mt-2 text-2xl font-extrabold text-[#13263A] sm:text-3xl">Cleaning Pricing Configuration</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Database-driven master pricing for packages, Build Your Own Scope minimums and area values, add-ons, carpet pricing, tax, inclusion rules and review/custom-quote controls.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Database-driven master pricing for customizable packages, included room allowances, extra-area values, add-ons, carpet pricing, tax, inclusion rules and review/custom-quote controls.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -237,15 +237,13 @@ export default function PricingSettingsClient() {
                 <div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#4A86F7]">Service Pricing</p><h2 className="mt-1 text-xl font-extrabold text-[#13263A]">{service.name}</h2></div>
                 <div className="flex flex-wrap items-end gap-4">
                   <MoneyInput label="Starting price" centsValue={service.startingPriceCents} onChange={value => update(draft => { draft.services[serviceKey].startingPriceCents = value; })} />
-                  <MoneyInput label="Custom minimum" centsValue={service.customScope.minimumChargeCents} onChange={value => update(draft => { draft.services[serviceKey].customScope.minimumChargeCents = value; })} />
-                  <Toggle label="Build Your Own Scope" checked={service.customScope.enabled} onChange={value => update(draft => { draft.services[serviceKey].customScope.enabled = value; })} />
                   <Toggle label="Active" checked={service.enabled} onChange={value => update(draft => { draft.services[serviceKey].enabled = value; })} />
                 </div>
               </div>
 
               <div className="p-5">
                 <h3 className="text-sm font-extrabold text-[#13263A]">Base packages & room allowances</h3>
-                <p className="mt-1 text-xs text-slate-500">Base package prices and included room counts used by the future calculator.</p>
+                <p className="mt-1 text-xs text-slate-500">Each package base price is the minimum charge for that selected package. Customers can reduce included room counts to 0 without lowering the base price.</p>
                 <div className="mt-4 grid gap-4 xl:grid-cols-2">
                   {service.packages.map((pkg, packageIndex) => (
                     <div key={pkg.id} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/40 p-4 sm:p-5">
@@ -303,8 +301,8 @@ export default function PricingSettingsClient() {
 
                 <div className="mt-6 grid gap-5 xl:grid-cols-[2fr_1fr]">
                   <div>
-                    <h3 className="text-sm font-extrabold text-[#13263A]">Additional / Custom Area Unit Values</h3>
-                    <p className="mt-1 text-xs text-slate-500">These values price extra package areas and every selected area in Build Your Own Scope.</p>
+                    <h3 className="text-sm font-extrabold text-[#13263A]">Extra Area Unit Values</h3>
+                    <p className="mt-1 text-xs text-slate-500">These values are charged only when a customer selects a quantity above the chosen package allowance. Areas with a package allowance of 0 are charged from the first selected unit.</p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       {AREA_KEYS.map(areaKey => <MoneyInput key={areaKey} label={PRICING_AREA_LABELS[areaKey]} centsValue={service.additionalCharges[areaKey]} onChange={value => update(draft => { draft.services[serviceKey].additionalCharges[areaKey] = value; })} />)}
                     </div>

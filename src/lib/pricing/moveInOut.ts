@@ -4,6 +4,7 @@ import {
   PricingAreaValues,
   PricingPackage,
 } from "./config";
+import { calculatePackageScopeCompensation } from "./packageCompensation";
 
 export type MoveInOutSelection = {
   bedrooms: number;
@@ -13,6 +14,7 @@ export type MoveInOutSelection = {
   livingRooms: number;
   finishedBasement: number;
   stairFlights: number;
+  preferredPackageId?: string | null;
   unusualLayout?: boolean;
 };
 
@@ -61,13 +63,15 @@ export function normalizeMoveInOutSelection(
   input: Partial<MoveInOutSelection>,
 ): MoveInOutSelection {
   return {
-    bedrooms: whole(input.bedrooms, 1),
-    fullBathrooms: whole(input.fullBathrooms, 1),
+    bedrooms: whole(input.bedrooms, 0),
+    fullBathrooms: whole(input.fullBathrooms, 0),
     halfBathrooms: whole(input.halfBathrooms, 0),
-    kitchens: whole(input.kitchens, 1),
-    livingRooms: whole(input.livingRooms, 1),
+    kitchens: whole(input.kitchens, 0),
+    livingRooms: whole(input.livingRooms, 0),
     finishedBasement: whole(input.finishedBasement, 0),
     stairFlights: whole(input.stairFlights, 0),
+    preferredPackageId:
+      typeof input.preferredPackageId === "string" ? input.preferredPackageId : null,
     unusualLayout: input.unusualLayout === true,
   };
 }
@@ -90,17 +94,15 @@ export function chooseMoveInOutBasePackage(
   selection: MoveInOutSelection,
 ): PricingPackage {
   const service = config.services.move_in_out;
-  let id = "move_studio_1bed_1bath";
 
-  if (selection.bedrooms >= 4) {
-    id = selection.fullBathrooms >= 4 ? "move_4bed_4bath" : "move_4bed_3bath";
-  } else if (selection.bedrooms === 3) {
-    id = selection.fullBathrooms >= 3 ? "move_3bed_3bath" : "move_3bed_2bath";
-  } else if (selection.bedrooms === 2) {
-    id = "move_2bed_2bath";
+  if (selection.preferredPackageId) {
+    const preferred = service.packages.find(
+      (pkg) => pkg.id === selection.preferredPackageId && !pkg.customQuote,
+    );
+    if (preferred) return preferred;
   }
 
-  return byId(config, id) || service.packages[0];
+  return byId(config, "move_studio_1bed_1bath") || service.packages[0];
 }
 
 export function calculateMoveInOutPrice(
@@ -118,6 +120,12 @@ export function calculateMoveInOutPrice(
     config.customQuote.enabled &&
     config.customQuote.unusualLayoutRequiresReview &&
     selection.unusualLayout === true;
+
+  const scopeCompensation = calculatePackageScopeCompensation(
+    basePackage.allowances,
+    selection,
+    service.additionalCharges,
+  );
 
   const lineItems: MoveInOutPricingLineItem[] = [
     {
@@ -154,6 +162,16 @@ export function calculateMoveInOutPrice(
         amountCents: extra * unitPriceCents,
       });
     }
+  }
+
+  if (scopeCompensation.compensationCents > 0) {
+    lineItems.push({
+      key: "package_compensation",
+      label: "Package area compensation",
+      quantity: 1,
+      unitPriceCents: -scopeCompensation.compensationCents,
+      amountCents: -scopeCompensation.compensationCents,
+    });
   }
 
   const subtotalCents = lineItems.reduce((sum, item) => sum + item.amountCents, 0);

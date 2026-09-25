@@ -4,6 +4,7 @@ import {
   PricingAreaValues,
   PricingPackage,
 } from "./config";
+import { calculatePackageScopeCompensation } from "./packageCompensation";
 
 export type StandardCleaningSelection = {
   bedrooms: number;
@@ -62,11 +63,11 @@ export function normalizeStandardSelection(
   selection: Partial<StandardCleaningSelection>,
 ): StandardCleaningSelection {
   return {
-    bedrooms: normalizeWhole(selection.bedrooms, 1),
-    fullBathrooms: normalizeWhole(selection.fullBathrooms, 1),
+    bedrooms: normalizeWhole(selection.bedrooms, 0),
+    fullBathrooms: normalizeWhole(selection.fullBathrooms, 0),
     halfBathrooms: normalizeWhole(selection.halfBathrooms, 0),
-    kitchens: normalizeWhole(selection.kitchens, 1),
-    livingRooms: normalizeWhole(selection.livingRooms, 1),
+    kitchens: normalizeWhole(selection.kitchens, 0),
+    livingRooms: normalizeWhole(selection.livingRooms, 0),
     finishedBasement: normalizeWhole(selection.finishedBasement, 0),
     stairFlights: normalizeWhole(selection.stairFlights, 0),
     preferredPackageId:
@@ -108,18 +109,20 @@ export function chooseStandardBasePackage(
   selection: StandardCleaningSelection,
 ): PricingPackage {
   const standard = config.services.standard;
-  const candidates = standard.packages
-    .filter((pkg) => !pkg.customQuote && packageFitsSelection(pkg, selection))
-    .sort((a, b) => {
-      const coverage = packageCoverageScore(b) - packageCoverageScore(a);
-      if (coverage !== 0) return coverage;
-      return b.basePriceCents - a.basePriceCents;
-    });
 
-  if (candidates.length > 0) return candidates[0];
+  // A package is an explicit customer choice. Once selected, lowering room
+  // counts never swaps the customer into a cheaper tier or reduces the base.
+  // Only quantities above the selected package allowances add charges.
+  if (selection.preferredPackageId) {
+    const preferred = standard.packages.find(
+      (pkg) => pkg.id === selection.preferredPackageId && !pkg.customQuote,
+    );
+    if (preferred) return preferred;
+  }
 
   return (
     standard.packages.find((pkg) => pkg.id === "essential_standard") ||
+    standard.packages.find((pkg) => pkg.customerSelectable && !pkg.customQuote) ||
     standard.packages[0]
   );
 }
@@ -139,6 +142,12 @@ export function calculateStandardCleaningPrice(
     config.customQuote.enabled &&
     config.customQuote.unusualLayoutRequiresReview &&
     selection.unusualLayout === true;
+
+  const scopeCompensation = calculatePackageScopeCompensation(
+    basePackage.allowances,
+    selection,
+    standard.additionalCharges,
+  );
 
   const lineItems: StandardPricingLineItem[] = [
     {
@@ -175,6 +184,16 @@ export function calculateStandardCleaningPrice(
         amountCents: extraCount * unitPriceCents,
       });
     }
+  }
+
+  if (scopeCompensation.compensationCents > 0) {
+    lineItems.push({
+      key: "package_compensation",
+      label: "Package area compensation",
+      quantity: 1,
+      unitPriceCents: -scopeCompensation.compensationCents,
+      amountCents: -scopeCompensation.compensationCents,
+    });
   }
 
   const subtotalCents = lineItems.reduce(

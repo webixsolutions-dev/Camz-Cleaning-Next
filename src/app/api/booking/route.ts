@@ -15,7 +15,7 @@ import { validatePricingConfig } from "@/lib/pricing/config";
 import { calculateStandardCleaningPrice } from "@/lib/pricing/standard";
 import { calculateDeepCleaningPrice } from "@/lib/pricing/deep";
 import { calculateMoveInOutPrice } from "@/lib/pricing/moveInOut";
-import { calculateCustomScopePrice, selectedCustomScopeAreas } from "@/lib/pricing/customScope";
+import { PACKAGE_AREA_KEYS } from "@/lib/pricing/packageCompensation";
 import { calculateCarpetPrice, carpetAreaCount } from "@/lib/pricing/carpet";
 import { resolveCleaningPricingScope } from "@/lib/pricing/serviceScope";
 import { calculateServiceAddOns } from "@/lib/pricing/addOns";
@@ -393,30 +393,30 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const bookingMode = formData.bookingMode === "custom" ? "custom" : "package";
-      const customScopeService =
-        cleaningPricingScope !== "carpet"
-          ? validation.config.services[cleaningPricingScope]
-          : null;
-
-      if (bookingMode === "custom" && (!customScopeService || !customScopeService.customScope.enabled)) {
-        return NextResponse.json(
-          { error: "Build Your Own Scope is not available for this service." },
-          { status: 400 },
-        );
-      }
-
-      const defaultAreaCount = bookingMode === "custom" ? 0 : 1;
+      // Cleaning packages are always customizable. The selected package
+      // remains the price floor. Individual counters may be 0, but at least
+      // one cleaning area must remain selected.
+      const bookingMode = "package" as const;
       const areaInput = {
-        bedrooms: safeNumber(formData.bedrooms, defaultAreaCount),
-        fullBathrooms: safeNumber(formData.fullBathrooms, defaultAreaCount),
+        bedrooms: safeNumber(formData.bedrooms, 0),
+        fullBathrooms: safeNumber(formData.fullBathrooms, 0),
         halfBathrooms: safeNumber(formData.halfBathrooms, 0),
-        kitchens: safeNumber(formData.kitchens, defaultAreaCount),
-        livingRooms: safeNumber(formData.livingRooms, defaultAreaCount),
+        kitchens: safeNumber(formData.kitchens, 0),
+        livingRooms: safeNumber(formData.livingRooms, 0),
         finishedBasement: safeNumber(formData.finishedBasement, 0),
         stairFlights: safeNumber(formData.stairFlights, 0),
         unusualLayout: formData.unusualLayout === true,
       };
+
+      if (
+        cleaningPricingScope !== "carpet" &&
+        !PACKAGE_AREA_KEYS.some((key) => Number(areaInput[key] || 0) > 0)
+      ) {
+        return NextResponse.json(
+          { error: "Please select at least one room or area before continuing." },
+          { status: 400 },
+        );
+      }
 
       const carpetInput = {
         standardRooms: safeNumber(formData.carpetStandardRooms, 0),
@@ -433,10 +433,6 @@ export async function POST(request: NextRequest) {
       let baseCustomQuoteReason: string | null = null;
       let packageId: string | null = null;
       let packageName: string | null = null;
-      let customSelectedAreaSubtotalCents: number | null = null;
-      let customMinimumChargeCents: number | null = null;
-      let customMinimumAdjustmentCents: number | null = null;
-      let selectedCustomScope: Array<{ key: string; label: string; quantity: number }> = [];
       let pricingBreakdown: Array<{
         key: string;
         label: string;
@@ -445,31 +441,12 @@ export async function POST(request: NextRequest) {
         amount: number;
       }> = [];
 
-      if (bookingMode === "custom" && cleaningPricingScope !== "carpet") {
-        const result = calculateCustomScopePrice(
-          validation.config,
-          cleaningPricingScope,
-          areaInput,
-        );
-        baseSubtotalCents = result.subtotalCents;
-        baseCustomQuote = result.customQuote;
-        baseCustomQuoteReason = result.customQuoteReason;
-        packageName = result.packageName;
-        customSelectedAreaSubtotalCents = result.selectedAreaSubtotalCents;
-        customMinimumChargeCents = result.minimumChargeCents;
-        customMinimumAdjustmentCents = result.minimumAdjustmentCents;
-        selectedCustomScope = selectedCustomScopeAreas(result.selection);
-        pricingBreakdown = result.lineItems.map((item) => ({
-          key: item.key,
-          label: item.label,
-          quantity: item.quantity,
-          unitPrice: item.unitPriceCents / 100,
-          amount: item.amountCents / 100,
-        }));
-      } else if (cleaningPricingScope === "standard") {
+      if (cleaningPricingScope === "standard") {
         const result = calculateStandardCleaningPrice(validation.config, {
           ...areaInput,
-          preferredPackageId: cleanString(formData.standardPackageId, 80),
+          preferredPackageId:
+            cleanString(formData.standardPackageId, 80) ||
+            cleanString(formData.pricingPackageId, 80),
         });
         baseSubtotalCents = result.subtotalCents;
         baseCustomQuote = result.customQuote;
@@ -484,7 +461,10 @@ export async function POST(request: NextRequest) {
           amount: item.amountCents / 100,
         }));
       } else if (cleaningPricingScope === "deep") {
-        const result = calculateDeepCleaningPrice(validation.config, areaInput);
+        const result = calculateDeepCleaningPrice(validation.config, {
+          ...areaInput,
+          preferredPackageId: cleanString(formData.pricingPackageId, 80),
+        });
         baseSubtotalCents = result.subtotalCents;
         baseCustomQuote = result.customQuote;
         baseCustomQuoteReason = result.customQuoteReason;
@@ -498,7 +478,10 @@ export async function POST(request: NextRequest) {
           amount: item.amountCents / 100,
         }));
       } else if (cleaningPricingScope === "move_in_out") {
-        const result = calculateMoveInOutPrice(validation.config, areaInput);
+        const result = calculateMoveInOutPrice(validation.config, {
+          ...areaInput,
+          preferredPackageId: cleanString(formData.pricingPackageId, 80),
+        });
         baseSubtotalCents = result.subtotalCents;
         baseCustomQuote = result.customQuote;
         baseCustomQuoteReason = result.customQuoteReason;
@@ -572,6 +555,7 @@ export async function POST(request: NextRequest) {
         {
           bookingMode,
           selectedAreas: areaInput,
+          respectSelectedAreas: true,
         },
       );
       pricingBreakdown.push(
@@ -670,16 +654,7 @@ export async function POST(request: NextRequest) {
         selectedAddOns: sanitizedSelectedAddOns,
         pricingScope: cleaningPricingScope,
         bookingMode,
-        ...(bookingMode === "custom"
-          ? {
-              customScope: selectedCustomScope,
-              customSelectedAreaSubtotal:
-                (customSelectedAreaSubtotalCents || 0) / 100,
-              customMinimumCharge: (customMinimumChargeCents || 0) / 100,
-              customMinimumAdjustment:
-                (customMinimumAdjustmentCents || 0) / 100,
-            }
-          : {}),
+        packageCustomized: cleaningPricingScope !== "carpet",
         ...(packageId ? { pricingPackageId: packageId } : {}),
         ...(packageName ? { pricingPackageName: packageName } : {}),
         ...(cleaningPricingScope === "standard" && packageId

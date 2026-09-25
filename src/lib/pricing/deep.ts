@@ -4,6 +4,7 @@ import {
   PricingAreaValues,
   PricingPackage,
 } from "./config";
+import { calculatePackageScopeCompensation } from "./packageCompensation";
 
 export type DeepCleaningSelection = {
   bedrooms: number;
@@ -13,6 +14,7 @@ export type DeepCleaningSelection = {
   livingRooms: number;
   finishedBasement: number;
   stairFlights: number;
+  preferredPackageId?: string | null;
   unusualLayout?: boolean;
 };
 
@@ -61,13 +63,15 @@ export function normalizeDeepSelection(
   input: Partial<DeepCleaningSelection>,
 ): DeepCleaningSelection {
   return {
-    bedrooms: whole(input.bedrooms, 1),
-    fullBathrooms: whole(input.fullBathrooms, 1),
+    bedrooms: whole(input.bedrooms, 0),
+    fullBathrooms: whole(input.fullBathrooms, 0),
     halfBathrooms: whole(input.halfBathrooms, 0),
-    kitchens: whole(input.kitchens, 1),
-    livingRooms: whole(input.livingRooms, 1),
+    kitchens: whole(input.kitchens, 0),
+    livingRooms: whole(input.livingRooms, 0),
     finishedBasement: whole(input.finishedBasement, 0),
     stairFlights: whole(input.stairFlights, 0),
+    preferredPackageId:
+      typeof input.preferredPackageId === "string" ? input.preferredPackageId : null,
     unusualLayout: input.unusualLayout === true,
   };
 }
@@ -90,12 +94,11 @@ export function chooseDeepBasePackage(
 ): PricingPackage {
   const deep = config.services.deep;
 
-  if (selection.bedrooms >= 2 && selection.fullBathrooms >= 2) {
-    return findPackage(config, "deep_2bed_2bath") || deep.packages[deep.packages.length - 1];
-  }
-
-  if (selection.bedrooms >= 2) {
-    return findPackage(config, "deep_2bed_1bath") || deep.packages[0];
+  if (selection.preferredPackageId) {
+    const preferred = deep.packages.find(
+      (pkg) => pkg.id === selection.preferredPackageId && !pkg.customQuote,
+    );
+    if (preferred) return preferred;
   }
 
   return findPackage(config, "deep_1bed_1bath") || deep.packages[0];
@@ -108,6 +111,12 @@ export function calculateDeepCleaningPrice(
   const selection = normalizeDeepSelection(input);
   const deep = config.services.deep;
   const basePackage = chooseDeepBasePackage(config, selection);
+
+  const scopeCompensation = calculatePackageScopeCompensation(
+    basePackage.allowances,
+    selection,
+    deep.additionalCharges,
+  );
 
   const lineItems: DeepPricingLineItem[] = [
     {
@@ -144,6 +153,16 @@ export function calculateDeepCleaningPrice(
         amountCents: extra * unitPriceCents,
       });
     }
+  }
+
+  if (scopeCompensation.compensationCents > 0) {
+    lineItems.push({
+      key: "package_compensation",
+      label: "Package area compensation",
+      quantity: 1,
+      unitPriceCents: -scopeCompensation.compensationCents,
+      amountCents: -scopeCompensation.compensationCents,
+    });
   }
 
   const subtotalCents = lineItems.reduce((sum, item) => sum + item.amountCents, 0);
